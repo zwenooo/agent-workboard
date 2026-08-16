@@ -27,8 +27,8 @@ export function isLocalCompanionRoute(pathname) {
     || /^\/api\/projects\/[^/]+\/development-contexts$/.test(pathname);
 }
 
-function basicAuthorization(actorName, sharedKey) {
-  return `Basic ${Buffer.from(`${actorName}:${sharedKey}`, "utf8").toString("base64")}`;
+export function basicAuthorization(actorName, accountPassword) {
+  return `Basic ${Buffer.from(`${actorName}:${accountPassword}`, "utf8").toString("base64")}`;
 }
 
 function removeGitWorktreePaths(value) {
@@ -224,7 +224,7 @@ export function createCloudProxy({
   return {
     async forward(request) {
       const config = await readConfig();
-      if (!config?.remoteUrl || !config.actorName || !config.sharedKey) {
+      if (!config?.remoteUrl || !config.actorName || !config.accessToken) {
         throw new CloudProxyError(
           409,
           "CLOUD_NOT_CONFIGURED",
@@ -255,7 +255,7 @@ export function createCloudProxy({
       for (const name of [...headers.keys()]) {
         if (name.toLowerCase().startsWith("x-taskboard-user-")) headers.delete(name);
       }
-      headers.set("authorization", basicAuthorization(config.actorName, config.sharedKey));
+      headers.set("authorization", `Bearer ${config.accessToken}`);
 
       const prepared = await prepareRequest(request, {
         assertTaskProjectMoveAllowed,

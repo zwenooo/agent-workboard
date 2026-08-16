@@ -159,11 +159,11 @@ npm run codex:inject -- --port 9229 --open
 
 ## 通过 Cloudflare 共享
 
-对于两名受信任的协作者，Taskboard 可以在 Cloudflare 上运行，使用 Worker Static Assets 和 API 路由，以 D1 作为权威业务数据库，并使用私有 R2 bucket 存储附件。该部署使用带共享密码的 HTTPS Basic 身份验证，并在全局修订号变化后刷新已打开的面板。
+对于小型团队，Taskboard 可以在 Cloudflare 上运行，使用 Worker Static Assets 和 API 路由，以 D1 作为权威业务数据库，并使用私有 R2 bucket 存储附件。每位成员拥有独立账号和密码；管理员可以创建、停用成员和重置密码。浏览器使用安全会话登录，`taskctl` 则通过本机 companion 验证同一套成员凭据。
 
 每台设备保留自己的项目检出映射，并继续使用**本地 companion**（本机配套服务 / 环回代理）提供 Codex、Git/worktree、Skill 和 MCP 能力。请勿将 companion 译为「伴侣」，也不要把普通 Taskboard HTTP 接口称为「伴侣 API」。云端模式绝不会回退到本地 SQLite 数据库，也不会同时写入本地数据库。
 
-请参阅[云端协作](docs/cloud-collaboration.md)，了解所有者部署、现有 GitHub 安装设置、密码轮换、本地路径映射和一次性本地数据迁移流程。
+请参阅[云端协作](docs/cloud-collaboration.md)，了解所有者部署、成员设置、密码重置与撤销、本地路径映射和一次性本地数据迁移流程。
 
 ## 验证
 

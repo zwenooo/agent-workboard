@@ -122,6 +122,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     body = {} as T & ApiErrorBody;
   }
 
+  if (response.status === 401) window.dispatchEvent(new Event("taskboard:auth-required"));
   if (!response.ok) throw new ApiError(response.status, body);
   return body;
 }

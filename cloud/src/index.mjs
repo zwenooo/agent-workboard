@@ -5,6 +5,10 @@ const JSON_BODY_LIMIT = 1024 * 1024;
 const ATTACHMENT_BODY_LIMIT = 25 * 1024 * 1024;
 const DEFAULT_PROJECT_LABELS_JSON = JSON.stringify(DEFAULT_LABEL_NAMES);
 const PROJECT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+const MEMBER_SESSION_COOKIE = "taskboard_session";
+const MEMBER_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const MEMBER_CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PASSWORD_ITERATIONS = 210_000;
 const TASK_STATUSES = [
   "backlog",
   "todo",
@@ -379,57 +383,208 @@ function decodeBasicCredentials(header) {
 function unauthorized() {
   return json(
     401,
-    { error: { code: "UNAUTHORIZED", message: "Valid Basic credentials are required" } },
-    { "www-authenticate": 'Basic realm="Codex Taskboard", charset="UTF-8"' },
+    { error: { code: "UNAUTHORIZED", message: "Please sign in to continue" } },
   );
 }
 
-async function authenticate(request, env) {
-  if (typeof env.TASKBOARD_SHARED_SECRET !== "string" || env.TASKBOARD_SHARED_SECRET === "") {
-    throw new ApiError(
-      500,
-      "SERVER_MISCONFIGURED",
-      "TASKBOARD_SHARED_SECRET is not configured",
-    );
-  }
-  const credentials = decodeBasicCredentials(request.headers.get("authorization"));
-  if (!credentials) return null;
-  const encoder = new TextEncoder();
-  const [providedSecret, configuredSecret] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(credentials.password)),
-    crypto.subtle.digest("SHA-256", encoder.encode(env.TASKBOARD_SHARED_SECRET)),
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function randomToken(size = 32) {
+  return bytesToBase64(crypto.getRandomValues(new Uint8Array(size)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+async function sha256Base64(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return bytesToBase64(new Uint8Array(digest));
+}
+
+async function secretsMatch(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || !left || !right) return false;
+  const [leftDigest, rightDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(left)),
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(right)),
   ]);
-  if (!crypto.subtle.timingSafeEqual(providedSecret, configuredSecret)) return null;
-  const username = stringField(credentials.username, "Basic username", {
-    required: true,
-    maxLength: 120,
-  });
-  const userId = `basic:${encodeURIComponent(username.toLowerCase())}`;
-  if (request.headers.get("x-taskboard-client") === "taskctl") {
-    return {
-      type: "agent",
-      id: `${userId}:codex-agent`,
-      name: `Codex Agent (${username})`,
-      avatarUrl: null,
-      username,
-    };
+  return crypto.subtle.timingSafeEqual(leftDigest, rightDigest);
+}
+
+function normalizeMemberUsername(value) {
+  const username = stringField(value, "username", { required: true, maxLength: 60 }).normalize("NFKC");
+  if (username.includes(":") || /[\u0000-\u001f\u007f]/.test(username)) {
+    throw new ApiError(400, "INVALID_USERNAME", "Username cannot contain ':' or control characters");
   }
+  return { username, normalized: username.toLocaleLowerCase("en-US") };
+}
+
+function parseMemberPassword(value, name = "password") {
+  if (typeof value !== "string" || value.length < 8 || value.length > 128) {
+    throw new ApiError(400, "INVALID_PASSWORD", `'${name}' must be 8 to 128 characters`);
+  }
+  return value;
+}
+
+async function passwordRecord(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PASSWORD_ITERATIONS },
+    material,
+    256,
+  );
   return {
-    type: "user",
-    id: userId,
-    name: username,
-    avatarUrl: null,
-    username,
+    passwordSalt: bytesToBase64(salt),
+    passwordHash: bytesToBase64(new Uint8Array(bits)),
+    passwordIterations: PASSWORD_ITERATIONS,
   };
+}
+
+async function verifyMemberPassword(password, member) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: base64ToBytes(member.password_salt),
+      iterations: member.password_iterations,
+    },
+    material,
+    256,
+  );
+  return crypto.subtle.timingSafeEqual(bits, base64ToBytes(member.password_hash).buffer);
+}
+
+function memberPublic(member) {
+  return {
+    id: member.id,
+    username: member.username,
+    displayName: member.display_name,
+    role: member.role,
+    active: member.active === 1,
+    createdAt: member.created_at,
+    updatedAt: member.updated_at,
+    lastLoginAt: member.last_login_at,
+  };
+}
+
+function actorFromMember(member, request, source) {
+  const taskctl = source !== "session" && request.headers.get("x-taskboard-client") === "taskctl";
+  const userId = `member:${member.id}`;
+  return {
+    type: taskctl ? "agent" : "user",
+    id: taskctl ? `${userId}:codex-agent` : userId,
+    name: taskctl ? `Codex Agent (${member.display_name})` : member.display_name,
+    avatarUrl: null,
+    username: member.username,
+    memberId: member.id,
+    role: member.role,
+    source,
+  };
+}
+
+function cookieValue(request, name) {
+  const cookie = request.headers.get("cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return value.join("=");
+  }
+  return null;
+}
+
+function sessionCookie(request, token, maxAge = MEMBER_SESSION_TTL_SECONDS) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return `${MEMBER_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+}
+
+async function memberByUsername(env, username) {
+  return env.DB.prepare(`
+    SELECT * FROM members WHERE username_normalized = ?
+  `).bind(username.normalize("NFKC").toLocaleLowerCase("en-US")).first();
+}
+
+async function issueMemberToken(env, memberId, ttlSeconds = MEMBER_SESSION_TTL_SECONDS) {
+  const token = randomToken();
+  const timestamp = now();
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM member_sessions WHERE expires_at <= ?`).bind(timestamp),
+    env.DB.prepare(`
+      INSERT INTO member_sessions (id, member_id, token_hash, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(uuid(), memberId, await sha256Base64(token), expiresAt, timestamp),
+  ]);
+  return { token, expiresAt };
+}
+
+async function createMemberSession(request, env, memberId) {
+  const { token } = await issueMemberToken(env, memberId);
+  return sessionCookie(request, token);
+}
+
+async function memberForToken(env, token) {
+  return env.DB.prepare(`
+    SELECT members.*
+    FROM member_sessions
+    JOIN members ON members.id = member_sessions.member_id
+    WHERE member_sessions.token_hash = ?
+      AND member_sessions.expires_at > ?
+      AND members.active = 1
+  `).bind(await sha256Base64(token), now()).first();
+}
+
+async function authenticate(request, env) {
+  const sessionToken = cookieValue(request, MEMBER_SESSION_COOKIE);
+  if (sessionToken) {
+    const member = await memberForToken(env, sessionToken);
+    if (member) return actorFromMember(member, request, "session");
+  }
+
+  const authorization = request.headers.get("authorization") ?? "";
+  if (authorization.startsWith("Bearer ")) {
+    const token = authorization.slice(7).trim();
+    const member = token ? await memberForToken(env, token) : null;
+    if (member) return actorFromMember(member, request, "token");
+    return null;
+  }
+
+  const credentials = decodeBasicCredentials(authorization);
+  if (!credentials) return null;
+  const member = await memberByUsername(env, credentials.username);
+  if (!member || member.active !== 1 || !await verifyMemberPassword(credentials.password, member)) return null;
+  return actorFromMember(member, request, "basic");
 }
 
 function resolveAssignee(target, actor) {
   if (target === undefined || target === "current-user") return actor;
-  const userId = `basic:${encodeURIComponent(actor.username.toLowerCase())}`;
+  const userId = actor.memberId
+    ? `member:${actor.memberId}`
+    : `basic:${encodeURIComponent(actor.username.toLowerCase())}`;
   return {
     type: "agent",
     id: `${userId}:codex-agent`,
-    name: `Codex Agent (${actor.username})`,
+    name: `Codex Agent (${actor.name.replace(/^Codex Agent \((.*)\)$/, "$1")})`,
     avatarUrl: null,
   };
 }
@@ -2650,6 +2805,280 @@ async function attachmentContent(env, id, request, download = false) {
   });
 }
 
+async function membersExist(env) {
+  return (await env.DB.prepare(`SELECT COUNT(*) AS count FROM members`).first("count")) > 0;
+}
+
+function requireMemberActor(actor) {
+  if (!actor) throw new ApiError(401, "UNAUTHORIZED", "Please sign in to continue");
+  return actor;
+}
+
+function requireAdminActor(actor) {
+  requireMemberActor(actor);
+  if (actor.role !== "admin") {
+    throw new ApiError(403, "ADMIN_REQUIRED", "Administrator access is required");
+  }
+  return actor;
+}
+
+async function insertMember(env, input) {
+  const { username, normalized } = normalizeMemberUsername(input.username);
+  const displayName = stringField(input.displayName, "displayName", {
+    required: true,
+    maxLength: 80,
+  });
+  const role = input.role ?? "member";
+  if (role !== "admin" && role !== "member") {
+    throw new ApiError(400, "INVALID_ROLE", "'role' must be admin or member");
+  }
+  const password = parseMemberPassword(input.password);
+  const passwordData = await passwordRecord(password);
+  const id = uuid();
+  const timestamp = now();
+  try {
+    await env.DB.prepare(`
+      INSERT INTO members (
+        id, username, username_normalized, display_name, role, active,
+        password_salt, password_hash, password_iterations, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      username,
+      normalized,
+      displayName,
+      role,
+      passwordData.passwordSalt,
+      passwordData.passwordHash,
+      passwordData.passwordIterations,
+      timestamp,
+      timestamp,
+    ).run();
+  } catch (error) {
+    if (String(error).includes("UNIQUE")) {
+      throw new ApiError(409, "USERNAME_TAKEN", "This username is already in use");
+    }
+    throw error;
+  }
+  return env.DB.prepare(`SELECT * FROM members WHERE id = ?`).bind(id).first();
+}
+
+async function routeAuth(request, env, actor, url) {
+  const { pathname } = url;
+  requireNoQuery(url, `${request.method} ${pathname}`);
+
+  if (pathname === "/api/auth/status") {
+    if (request.method !== "GET") methodNotAllowed(["GET"]);
+    const setupRequired = !await membersExist(env);
+    return json(200, {
+      mode: "member",
+      setupRequired,
+      authenticated: Boolean(actor),
+      member: actor
+        ? {
+            id: actor.memberId,
+            username: actor.username,
+            displayName: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+            role: actor.role,
+          }
+        : null,
+    });
+  }
+
+  if (pathname === "/api/auth/setup") {
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    if (await membersExist(env)) {
+      throw new ApiError(409, "SETUP_COMPLETE", "The first administrator has already been created");
+    }
+    const body = await readJson(request);
+    assertPlainObject(body);
+    assertAllowedKeys(body, new Set(["bootstrapSecret", "username", "displayName", "password"]));
+    if (!await secretsMatch(body.bootstrapSecret, env.TASKBOARD_SHARED_SECRET)) {
+      throw new ApiError(401, "INVALID_BOOTSTRAP_SECRET", "The deployment key is incorrect");
+    }
+    const member = await insertMember(env, { ...body, role: "admin" });
+    const setCookie = await createMemberSession(request, env, member.id);
+    return json(201, { member: memberPublic(member) }, { "set-cookie": setCookie });
+  }
+
+  if (pathname === "/api/auth/login") {
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    const body = await readJson(request);
+    assertPlainObject(body);
+    assertAllowedKeys(body, new Set(["username", "password"]));
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const member = username && password ? await memberByUsername(env, username) : null;
+    if (!member || member.active !== 1 || !await verifyMemberPassword(password, member)) {
+      throw new ApiError(401, "INVALID_CREDENTIALS", "Username or password is incorrect");
+    }
+    const timestamp = now();
+    await env.DB.prepare(`UPDATE members SET last_login_at = ?, updated_at = ? WHERE id = ?`)
+      .bind(timestamp, timestamp, member.id).run();
+    member.last_login_at = timestamp;
+    member.updated_at = timestamp;
+    const setCookie = await createMemberSession(request, env, member.id);
+    return json(200, { member: memberPublic(member) }, { "set-cookie": setCookie });
+  }
+
+  if (pathname === "/api/auth/logout") {
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    const token = cookieValue(request, MEMBER_SESSION_COOKIE);
+    if (token) {
+      await env.DB.prepare(`DELETE FROM member_sessions WHERE token_hash = ?`)
+        .bind(await sha256Base64(token)).run();
+    }
+    return json(200, { authenticated: false }, {
+      "set-cookie": sessionCookie(request, "", 0),
+    });
+  }
+
+  if (pathname === "/api/auth/cli-login") {
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    requireMemberActor(actor);
+    if (actor.source !== "basic") {
+      throw new ApiError(400, "PASSWORD_LOGIN_REQUIRED", "CLI login requires a username and password");
+    }
+    const access = await issueMemberToken(env, actor.memberId, MEMBER_CLI_TOKEN_TTL_SECONDS);
+    return json(200, {
+      member: {
+        id: actor.memberId,
+        username: actor.username,
+        displayName: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+        role: actor.role,
+      },
+      accessToken: access.token,
+      expiresAt: access.expiresAt,
+    });
+  }
+
+  if (pathname === "/api/auth/change-password") {
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    requireMemberActor(actor);
+    const body = await readJson(request);
+    assertPlainObject(body);
+    assertAllowedKeys(body, new Set(["currentPassword", "newPassword"]));
+    const member = await env.DB.prepare(`SELECT * FROM members WHERE id = ?`)
+      .bind(actor.memberId).first();
+    if (!member || !await verifyMemberPassword(body.currentPassword ?? "", member)) {
+      throw new ApiError(401, "INVALID_CREDENTIALS", "Current password is incorrect");
+    }
+    const nextPassword = parseMemberPassword(body.newPassword, "newPassword");
+    const passwordData = await passwordRecord(nextPassword);
+    const timestamp = now();
+    await env.DB.batch([
+      env.DB.prepare(`
+        UPDATE members
+        SET password_salt = ?, password_hash = ?, password_iterations = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(
+        passwordData.passwordSalt,
+        passwordData.passwordHash,
+        passwordData.passwordIterations,
+        timestamp,
+        member.id,
+      ),
+      env.DB.prepare(`DELETE FROM member_sessions WHERE member_id = ?`).bind(member.id),
+    ]);
+    const setCookie = await createMemberSession(request, env, member.id);
+    return json(200, { changed: true }, { "set-cookie": setCookie });
+  }
+
+  throw new ApiError(404, "NOT_FOUND", "Authentication route not found");
+}
+
+async function routeMembers(request, env, actor, url) {
+  requireAdminActor(actor);
+  requireNoQuery(url, `${request.method} ${url.pathname}`);
+
+  if (url.pathname === "/api/members") {
+    if (request.method === "GET") {
+      const { results } = await env.DB.prepare(`
+        SELECT * FROM members ORDER BY active DESC, role ASC, display_name COLLATE NOCASE
+      `).all();
+      return json(200, { members: results.map(memberPublic) });
+    }
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      assertPlainObject(body);
+      assertAllowedKeys(body, new Set(["username", "displayName", "password", "role"]));
+      return json(201, { member: memberPublic(await insertMember(env, body)) });
+    }
+    methodNotAllowed(["GET", "POST"]);
+  }
+
+  const match = /^\/api\/members\/([^/]+)$/.exec(url.pathname);
+  if (!match) throw new ApiError(404, "NOT_FOUND", "Member route not found");
+  if (request.method !== "PATCH") methodNotAllowed(["PATCH"]);
+  const memberId = decodePathPart(match[1], "member id");
+  const member = await env.DB.prepare(`SELECT * FROM members WHERE id = ?`).bind(memberId).first();
+  if (!member) throw new ApiError(404, "MEMBER_NOT_FOUND", "Member not found");
+
+  const body = await readJson(request);
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["displayName", "role", "active", "password"]));
+  const sets = [];
+  const values = [];
+  let invalidatesSessions = false;
+  const nextRole = body.role ?? member.role;
+  const nextActive = body.active ?? (member.active === 1);
+
+  if (body.displayName !== undefined) {
+    sets.push("display_name = ?");
+    values.push(stringField(body.displayName, "displayName", { required: true, maxLength: 80 }));
+  }
+  if (body.role !== undefined) {
+    if (body.role !== "admin" && body.role !== "member") {
+      throw new ApiError(400, "INVALID_ROLE", "'role' must be admin or member");
+    }
+    sets.push("role = ?");
+    values.push(body.role);
+  }
+  if (body.active !== undefined) {
+    if (typeof body.active !== "boolean") {
+      throw new ApiError(400, "INVALID_ACTIVE", "'active' must be a boolean");
+    }
+    sets.push("active = ?");
+    values.push(body.active ? 1 : 0);
+    if (!body.active) invalidatesSessions = true;
+  }
+  if (body.password !== undefined) {
+    const passwordData = await passwordRecord(parseMemberPassword(body.password));
+    sets.push("password_salt = ?", "password_hash = ?", "password_iterations = ?");
+    values.push(
+      passwordData.passwordSalt,
+      passwordData.passwordHash,
+      passwordData.passwordIterations,
+    );
+    invalidatesSessions = true;
+  }
+  if (sets.length === 0) {
+    throw new ApiError(400, "NO_CHANGES", "At least one member field must be changed");
+  }
+
+  if (member.active === 1 && member.role === "admin" && (!nextActive || nextRole !== "admin")) {
+    const activeAdmins = await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM members WHERE active = 1 AND role = 'admin'
+    `).first("count");
+    if (activeAdmins <= 1) {
+      throw new ApiError(409, "LAST_ADMIN", "The last active administrator cannot be disabled or demoted");
+    }
+  }
+
+  sets.push("updated_at = ?");
+  values.push(now(), memberId);
+  const statements = [env.DB.prepare(`
+    UPDATE members SET ${sets.join(", ")} WHERE id = ?
+  `).bind(...values)];
+  if (invalidatesSessions) {
+    statements.push(env.DB.prepare(`DELETE FROM member_sessions WHERE member_id = ?`).bind(memberId));
+  }
+  await env.DB.batch(statements);
+  return json(200, {
+    member: memberPublic(await env.DB.prepare(`SELECT * FROM members WHERE id = ?`).bind(memberId).first()),
+  });
+}
+
 async function routeApi(request, env, actor, url) {
   const { pathname } = url;
 
@@ -2661,7 +3090,17 @@ async function routeApi(request, env, actor, url) {
       manageTaskboardSkillPath: null,
       realtime: { transport: "poll", intervalMs: 2000 },
       localCapabilities: { available: false },
+      currentUser: {
+        type: "user",
+        id: `member:${actor.memberId}`,
+        name: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+        avatarUrl: null,
+      },
     });
+  }
+
+  if (pathname === "/api/members" || pathname.startsWith("/api/members/")) {
+    return routeMembers(request, env, actor, url);
   }
 
   if (pathname === "/api/revisions") {
@@ -3009,14 +3448,21 @@ export default {
         return withSecurityHeaders(json(200, { status: "ok" }));
       }
 
-      const actor = await authenticate(request, env);
-      if (!actor) return withSecurityHeaders(unauthorized());
+      if (url.pathname.startsWith("/api/auth/")) {
+        const actor = await authenticate(request, env);
+        return withSecurityHeaders(await routeAuth(request, env, actor, url));
+      }
 
-      const response = url.pathname.startsWith("/api/")
-        ? await routeApi(request, env, actor, url)
-        : env.ASSETS
+      let response;
+      if (url.pathname.startsWith("/api/")) {
+        const actor = await authenticate(request, env);
+        if (!actor) return withSecurityHeaders(unauthorized());
+        response = await routeApi(request, env, actor, url);
+      } else {
+        response = env.ASSETS
           ? await env.ASSETS.fetch(request)
           : json(404, { error: { code: "NOT_FOUND", message: "Resource not found" } });
+      }
       return withSecurityHeaders(response);
     } catch (error) {
       if (error instanceof ApiError) {

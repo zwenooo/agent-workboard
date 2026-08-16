@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const CONFIG_VERSION = 1;
+const CONFIG_VERSION = 2;
 
 class CloudConfigError extends Error {
   constructor(code, message) {
@@ -16,7 +16,7 @@ function emptyConfig() {
     version: CONFIG_VERSION,
     remoteUrl: null,
     actorName: null,
-    sharedKey: null,
+    accessToken: null,
     projectMappings: {},
   };
 }
@@ -47,7 +47,7 @@ export function normalizeCloudUrl(value) {
   return url.origin;
 }
 
-function validateCredentials(actorName, sharedKey) {
+function validateCredentials(actorName, accessToken) {
   if (
     typeof actorName !== "string"
     || !actorName.trim()
@@ -59,13 +59,13 @@ function validateCredentials(actorName, sharedKey) {
       "Cloud actor name must be 1 to 120 characters and cannot contain ':'",
     );
   }
-  if (typeof sharedKey !== "string" || !sharedKey || sharedKey.length > 4096) {
+  if (typeof accessToken !== "string" || !accessToken || accessToken.length > 4096) {
     throw new CloudConfigError(
-      "INVALID_CLOUD_KEY",
-      "Cloud shared key must be 1 to 4096 characters",
+      "INVALID_CLOUD_TOKEN",
+      "Cloud access token must be 1 to 4096 characters",
     );
   }
-  return { actorName: actorName.trim(), sharedKey };
+  return { actorName: actorName.trim(), accessToken };
 }
 
 function validateProjectMappings(value) {
@@ -84,6 +84,17 @@ function validateProjectMappings(value) {
 
 function parseConfig(value) {
   if (
+    value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && value.version === 1
+  ) {
+    return {
+      ...emptyConfig(),
+      projectMappings: validateProjectMappings(value.projectMappings),
+    };
+  }
+  if (
     value === null
     || typeof value !== "object"
     || Array.isArray(value)
@@ -95,17 +106,17 @@ function parseConfig(value) {
     "version",
     "remoteUrl",
     "actorName",
-    "sharedKey",
+    "accessToken",
     "projectMappings",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) {
     throw new CloudConfigError("INVALID_CLOUD_CONFIG", "Cloud companion configuration is invalid");
   }
   const projectMappings = validateProjectMappings(value.projectMappings);
-  if (value.remoteUrl === null && value.actorName === null && value.sharedKey === null) {
+  if (value.remoteUrl === null && value.actorName === null && value.accessToken === null) {
     return { ...emptyConfig(), projectMappings };
   }
-  const credentials = validateCredentials(value.actorName, value.sharedKey);
+  const credentials = validateCredentials(value.actorName, value.accessToken);
   return {
     version: CONFIG_VERSION,
     remoteUrl: normalizeCloudUrl(value.remoteUrl),
@@ -149,9 +160,9 @@ export function createCloudConfigStore({ configPath }) {
       await pendingWrite;
       return readFromDisk();
     },
-    async configure({ remoteUrl, actorName, sharedKey }) {
+    async configure({ remoteUrl, actorName, accessToken }) {
       const normalizedUrl = normalizeCloudUrl(remoteUrl);
-      const credentials = validateCredentials(actorName, sharedKey);
+      const credentials = validateCredentials(actorName, accessToken);
       return update((config) => ({
         ...config,
         remoteUrl: normalizedUrl,
@@ -163,7 +174,7 @@ export function createCloudConfigStore({ configPath }) {
         ...config,
         remoteUrl: null,
         actorName: null,
-        sharedKey: null,
+        accessToken: null,
       }));
     },
     setProjectWorkspace(projectId, workspacePath) {

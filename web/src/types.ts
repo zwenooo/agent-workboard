@@ -40,6 +40,7 @@ export interface TaskboardMetadata {
   manageTaskboardSkillPath?: string;
   capabilities?: TaskboardCapabilities;
   mode?: "local" | "cloud";
+  currentUser?: ActorIdentity;
   realtime?: {
     transport: "poll";
     intervalMs: number;

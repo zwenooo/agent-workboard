@@ -567,19 +567,19 @@ async function cloudLogin(api, rawUrl, actorName, overrides) {
       exitCode: 2,
     });
   }
-  const sharedKey = overrides.readSecret
+  const accountPassword = overrides.readSecret
     ? await overrides.readSecret()
     : await readSecretFromInput(
       overrides.stdin ?? process.stdin,
       overrides.stderr ?? process.stderr,
     );
-  if (typeof sharedKey !== "string" || !sharedKey) {
-    throw usageError("Cloud shared key cannot be empty");
+  if (typeof accountPassword !== "string" || !accountPassword) {
+    throw usageError("Account password cannot be empty");
   }
   return api.request("PUT", "/api/local/cloud-session", {
     remoteUrl,
     actorName,
-    sharedKey,
+    accountPassword,
   });
 }
 
@@ -618,7 +618,7 @@ async function readSecretFromInput(input, output) {
         }
       }
     };
-    output.write("Shared key: ");
+    output.write("Account password: ");
     input.setRawMode(true);
     input.setEncoding("utf8");
     input.resume();

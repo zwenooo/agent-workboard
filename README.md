@@ -163,11 +163,11 @@ LAN mode has no account authentication: anyone on the trusted local network who 
 
 ## Share through Cloudflare
 
-For two trusted collaborators, the taskboard can run on Cloudflare with Worker Static Assets and API routes, D1 as the authoritative business database, and a private R2 bucket for attachments. The deployment uses HTTPS Basic Authentication with a shared password and refreshes open boards after a global revision changes.
+For a small team, the taskboard can run on Cloudflare with Worker Static Assets and API routes, D1 as the authoritative business database, and a private R2 bucket for attachments. Every member has an individual account and password; administrators can create, disable, and reset members. Browser access uses secure sessions, while `taskctl` validates the same member credentials through the local companion.
 
 Each device keeps its own project checkout mapping and continues to use a local companion for Codex, Git/worktree, Skill, and MCP capabilities. Cloud mode never falls back to or double-writes the local SQLite database.
 
-See [Cloud collaboration](docs/cloud-collaboration.md) for owner deployment, existing GitHub installation setup, password rotation, local path mapping, and the one-time local-data migration flow.
+See [Cloud collaboration](docs/cloud-collaboration.md) for owner deployment, member setup, password reset and revocation, local path mapping, and the one-time local-data migration flow.
 
 ## Verify
 

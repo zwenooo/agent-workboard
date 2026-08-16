@@ -22,8 +22,9 @@ import { executableCommand } from "../shared/executable-command.mjs";
 import { normalizeWorkflowSnapshot } from "../shared/workflow-control-flow.mjs";
 import { AiChatService } from "./ai-chat.mjs";
 import { resolveAiWorkspace, resolveMappedAiWorkspace } from "./ai-chat-catalog.mjs";
-import { createCloudConfigStore } from "./cloud-config.mjs";
+import { createCloudConfigStore, normalizeCloudUrl } from "./cloud-config.mjs";
 import {
+  basicAuthorization,
   CloudProxyError,
   createCloudProxy,
   isLocalCompanionRoute,
@@ -1491,9 +1492,10 @@ export function createTaskboardServer(options = {}) {
     const threadBinding = currentHostThreadBinding(input.threadId);
     return threadBinding ? { ...input, threadBinding } : input;
   }
+  const remoteFetch = options.remoteFetch ?? globalThis.fetch;
   const cloudProxy = createCloudProxy({
     configStore: cloudConfig,
-    fetch: options.remoteFetch ?? globalThis.fetch,
+    fetch: remoteFetch,
     resolveThreadBinding: currentHostThreadBinding,
     resolveDevelopmentContext: async (projectId, context) => {
       if (!context.branch) return null;
@@ -1934,12 +1936,39 @@ export function createTaskboardServer(options = {}) {
         if (request.method === "PUT") {
           const body = await readJson(request);
           assertPlainObject(body);
-          assertAllowedKeys(body, new Set(["remoteUrl", "actorName", "sharedKey"]));
+          assertAllowedKeys(body, new Set(["remoteUrl", "actorName", "accountPassword"]));
           try {
+            const remoteUrl = normalizeCloudUrl(body.remoteUrl);
+            const validation = await remoteFetch(new URL("/api/auth/cli-login", `${remoteUrl}/`), {
+              method: "POST",
+              headers: {
+                authorization: basicAuthorization(body.actorName, body.accountPassword),
+                "x-taskboard-client": "taskctl",
+              },
+            });
+            if (validation.status === 401) {
+              throw new ApiError(401, "INVALID_CLOUD_CREDENTIALS", "账号或密码不正确");
+            }
+            if (!validation.ok) {
+              throw new ApiError(
+                502,
+                "CLOUD_LOGIN_FAILED",
+                `云端任务面板拒绝了登录验证（${validation.status}）`,
+              );
+            }
+            const login = await validation.json();
+            if (
+              typeof login?.accessToken !== "string"
+              || !login.accessToken
+              || typeof login?.member?.username !== "string"
+              || !login.member.username
+            ) {
+              throw new ApiError(502, "INVALID_CLOUD_LOGIN_RESPONSE", "云端任务面板返回了无效的登录响应");
+            }
             const config = await cloudConfig.configure({
-              remoteUrl: body.remoteUrl,
-              actorName: body.actorName,
-              sharedKey: body.sharedKey,
+              remoteUrl,
+              actorName: login.member.username,
+              accessToken: login.accessToken,
             });
             return sendJson(response, 200, {
               mode: "cloud",
@@ -1948,6 +1977,7 @@ export function createTaskboardServer(options = {}) {
               authenticated: true,
             });
           } catch (error) {
+            if (error instanceof ApiError) throw error;
             throw new ApiError(400, error.code ?? "INVALID_CLOUD_CONFIG", error.message);
           }
         }

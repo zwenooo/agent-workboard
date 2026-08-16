@@ -63,6 +63,7 @@ import {
 import { BoardColumn } from "./components/BoardColumn";
 import type { AiChatOpenThreadRequest } from "./components/AiChat";
 import { BoardCardDisplayMenu } from "./components/BoardCardDisplayMenu";
+import { CloudAccountControl } from "./components/CloudAccountControl";
 import { DashboardView } from "./components/DashboardView";
 import { IssueListView } from "./components/IssueListView";
 import { JiraConnectionDialog } from "./components/JiraConnectionDialog";
@@ -881,7 +882,7 @@ export function App() {
   useLayoutEffect(() => {
     if (selectedProject) rememberProjectOpen(selectedProject.id);
   }, [rememberProjectOpen, selectedProject]);
-  const currentUser = hostContext?.user ?? {
+  const currentUser = hostContext?.user ?? taskboardMetadata?.currentUser ?? {
     ...DEFAULT_USER_ACTOR,
     name: text("本地用户", "Local user"),
   };
@@ -1709,6 +1710,8 @@ export function App() {
         && current.realtime?.intervalMs === metadata.realtime?.intervalMs
         && current.manageTaskboardSkillPath === metadata.manageTaskboardSkillPath
         && current.localCapabilities?.available === metadata.localCapabilities?.available
+        && current.currentUser?.id === metadata.currentUser?.id
+        && current.currentUser?.name === metadata.currentUser?.name
           ? current
           : metadata
       ));
@@ -3265,6 +3268,7 @@ export function App() {
 
           <div className="nav-spacer" />
           <div className="nav-footer">
+            <CloudAccountControl />
             <div className={`connection connection-${connection}`}>
               <span aria-hidden="true" />
               {connection === "live"
