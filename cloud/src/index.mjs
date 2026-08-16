@@ -8,7 +8,8 @@ const PROJECT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const MEMBER_SESSION_COOKIE = "taskboard_session";
 const MEMBER_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MEMBER_CLI_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
-const PASSWORD_ITERATIONS = 210_000;
+// Cloudflare Workers Web Crypto caps PBKDF2 iteration counts at 100,000.
+const PASSWORD_ITERATIONS = 100_000;
 const TASK_STATUSES = [
   "backlog",
   "todo",
