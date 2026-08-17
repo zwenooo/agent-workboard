@@ -4,6 +4,12 @@
   "main": "cloud/src/index.mjs",
   "compatibility_date": "2026-07-24",
   "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "dev.codezsy.com",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./dist/web",
     "binding": "ASSETS",
