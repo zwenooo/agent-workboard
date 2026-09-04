@@ -8,7 +8,8 @@ Codex Taskboard can run as a shared Cloudflare deployment for a small team:
 - browser access uses individual member accounts and secure HTTP-only sessions;
 - `taskctl` and the local companion use the same individual username and password through HTTPS Basic Authentication;
 - `/health`, the login page, and the authentication status route are public;
-- open boards poll a global revision every two seconds and refresh after a change.
+- one SQLite-backed Durable Object broadcasts revision changes over hibernating WebSockets;
+- open boards refresh when a revision event arrives; reconnects perform one revision check and never poll periodically.
 
 The production resource names are:
 
@@ -17,12 +18,13 @@ The production resource names are:
 | Worker | `codex-taskboard` |
 | D1 database | `codex-taskboard-db` |
 | R2 bucket | `codex-taskboard-attachments` |
+| Durable Object class | `RealtimeHub` |
 
 Members are stored in D1 with a unique username, display name, role, active state, and an individually salted PBKDF2-SHA256 password hash. Administrators can create accounts, reset passwords, change roles, and disable members. Disabling a member or resetting a password revokes that member's existing browser sessions. Taskboard currently has two roles: administrators manage members, while both administrators and members can read and write board data.
 
 ## What stays local
 
-The cloud stores project, issue, comment, relation, workflow, and attachment data. It does not store a device's absolute project or worktree paths.
+The cloud stores project, issue, comment, relation, and attachment data. It does not store a device's absolute project or worktree paths.
 
 Each collaborator runs the **local companion**: a **device-local loopback service** (not a chat persona) for Codex, Git/worktree scanning, installed Skill/MCP discovery, and project path mapping. After password verification, the companion keeps the cloud URL, account username, a revocable access token, and device-specific project mappings in `.data/cloud-companion.json` with mode `0600`; it does not persist the member password. Ordinary Taskboard HTTP routes (tasks, comments, attachments) are the shared API; they are not a separate “companion API”.
 
@@ -87,6 +89,7 @@ Open the deployed Worker URL and create the first administrator with the bootstr
 Current Cloudflare references:
 
 - [Workers Static Assets binding](https://developers.cloudflare.com/workers/static-assets/binding/)
+- [Durable Objects with WebSocket Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
 - [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/)
 - [Create an R2 bucket](https://developers.cloudflare.com/r2/buckets/create-buckets/)
 - [Workers secrets](https://developers.cloudflare.com/workers/configuration/secrets/)

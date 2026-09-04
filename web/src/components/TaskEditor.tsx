@@ -25,24 +25,33 @@ import {
   assigneeTargetForActor,
 } from "../actors";
 import { ActorAvatar } from "./ActorAvatar";
-import { STATUS_DETAILS, StatusIcon } from "./BoardColumn";
 import { LabelPicker } from "./LabelPicker";
-import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
+import { IssuePickerContent } from "./IssueRelations";
+import { LinearIcon } from "./LinearIcon";
 import {
-  fileKey,
-  MAX_ATTACHMENT_SIZE,
-  PendingAttachments,
-} from "./PendingAttachments";
+  AttachmentIcon,
+  BranchIcon,
+  DueDateIcon,
+  MoreIcon,
+  PlusIcon,
+  PriorityIcon,
+  RecurrenceIcon,
+  RelationIcon,
+  StatusIcon,
+} from "./SemanticIcons";
 import {
   createInlineMediaSegments,
   InlineMediaComposer,
+  inlineMediaFiles,
   inlineMediaImages,
   serializeInlineMedia,
   type InlineMediaComposerHandle,
   type InlineMediaSegment,
+  type PendingInlineAttachment,
   type PendingInlineImage,
 } from "./InlineMediaComposer";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
+import { TaskboardIcon } from "./TaskboardIcon";
 
 const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], string>> = {
   zh: {
@@ -84,11 +93,13 @@ export interface NewTaskEditorDraft {
   startDate: string;
   dueDate: string;
   recurrence: Recurrence | null;
-  attachments: File[];
   relations: NewTaskRelationDraft;
 }
 
 interface TaskEditorProps {
+  projectId: string | null;
+  projectOptions?: Array<{ id: string; name: string }>;
+  onProjectChange?: (projectId: string | null) => void;
   task: Task | null;
   tasks: Task[];
   referenceTasks: Task[];
@@ -102,7 +113,7 @@ interface TaskEditorProps {
   onCancel: (draft: NewTaskEditorDraft | null) => void;
   onSave: (
     draft: TaskDraft,
-    attachments: File[],
+    inlineFiles: PendingInlineAttachment[],
     inlineImages: PendingInlineImage[],
     createOptions?: NewTaskCreateOptions,
   ) => Promise<void>;
@@ -145,6 +156,9 @@ function contextLabel(
 }
 
 export function TaskEditor({
+  projectId,
+  projectOptions,
+  onProjectChange,
   task,
   tasks,
   referenceTasks,
@@ -183,14 +197,13 @@ export function TaskEditor({
   const [relatedIds, setRelatedIds] = useState<string[]>(initialDraft?.relations.relatedIds ?? []);
   const [subIssueIds, setSubIssueIds] = useState<string[]>(initialDraft?.relations.subIssueIds ?? []);
   const [createMore, setCreateMore] = useState(false);
-  const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
+  const [menu, setMenu] = useState<"project" | "status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
   const [relationMenu, setRelationMenu] = useState<DraftRelationMenu | null>(null);
   const [moreMenuPosition, setMoreMenuPosition] = useState<{ right: number; bottom: number } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<TaskEditorError | null>(null);
   const [attachmentError, setAttachmentError] = useState<TaskEditorError | null>(null);
-  const [attachments, setAttachments] = useState<File[]>(initialDraft?.attachments ?? []);
 
   const developmentOptions = useMemo(() => {
     const options = [...developmentScan.contexts];
@@ -342,6 +355,10 @@ export function TaskEditor({
     if (!task) {
       if (!createSubmitIntentRef.current) return;
       createSubmitIntentRef.current = false;
+      if (projectOptions && !projectId) {
+        setError(["请选择项目。", "Select a project."]);
+        return;
+      }
     }
     const cleanTitle = title.trim();
     if (!cleanTitle) {
@@ -380,14 +397,13 @@ export function TaskEditor({
         startDate: startDate || null,
         dueDate: dueDate || null,
         recurrence,
-      }, attachments, inlineMediaImages(descriptionSegments), task ? undefined : {
+      }, inlineMediaFiles(descriptionSegments), inlineMediaImages(descriptionSegments), task ? undefined : {
         keepOpen: createMore,
         relations: { parentId, relatedIds, subIssueIds },
       });
       if (!task && createMore) {
         setTitle("");
         setDescriptionSegments(createInlineMediaSegments());
-        setAttachments([]);
         setSubIssueIds([]);
         setRelationMenu(null);
         setAttachmentError(null);
@@ -425,23 +441,6 @@ export function TaskEditor({
     if (task) event.currentTarget.requestSubmit();
   }
 
-  function addAttachments(files: FileList | File[]) {
-    const selected = Array.from(files);
-    const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);
-    if (oversized) {
-      setAttachmentError([
-        `“${oversized.name}” 超过 25 MB，无法上传。`,
-        `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
-      ]);
-      return;
-    }
-    setAttachmentError(null);
-    setAttachments((current) => {
-      const existing = new Set(current.map(fileKey));
-      return [...current, ...selected.filter((file) => !existing.has(fileKey(file)))];
-    });
-  }
-
   function chooseDueDate(value: string) {
     setDueDate(value);
     setMenu(null);
@@ -459,7 +458,6 @@ export function TaskEditor({
       startDate,
       dueDate,
       recurrence,
-      attachments,
       relations: { parentId, relatedIds, subIssueIds },
     });
   }
@@ -538,21 +536,13 @@ export function TaskEditor({
               segments={descriptionSegments}
               mentionTasks={tasks}
               referenceTasks={referenceTasks}
+              completionContext={projectId ? { projectId, surface: "issue-description" } : undefined}
               placeholder={text("添加描述…", "Add description…")}
               ariaLabel={text("描述", "Description")}
               disabled={saving}
+              allowAttachments
               onChange={setDescriptionSegments}
               onError={setAttachmentError}
-            />
-          )}
-
-          {!task && (
-            <PendingAttachments
-              files={attachments}
-              disabled={saving}
-              uploadLabel={text("保存后上传", "Upload after saving")}
-              ariaLabel={text("待上传附件", "Pending attachments")}
-              onRemove={(index) => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
             />
           )}
 
@@ -560,13 +550,38 @@ export function TaskEditor({
 
         <div className="task-form-dock">
           <div className="property-row">
+            {!task && projectOptions && (
+              <TaskPropertyPicker
+                value={projectId ?? ""}
+                options={[
+                  {
+                    value: "",
+                    label: text("项目", "Project"),
+                    icon: <TaskboardIcon name="projectFolder" />,
+                  },
+                  ...projectOptions.map((project) => ({
+                    value: project.id,
+                    label: project.name,
+                    icon: <TaskboardIcon name="projectFolder" />,
+                  })),
+                ]}
+                open={menu === "project"}
+                triggerClassName="property-control property-project"
+                ariaLabel={text("项目", "Project")}
+                onOpenChange={(open) => setMenu(open ? "project" : null)}
+                onChange={(value) => {
+                  const nextProjectId = value || null;
+                  if (nextProjectId !== projectId) setDevelopmentContext(null);
+                  onProjectChange?.(nextProjectId);
+                }}
+              />
+            )}
             <TaskPropertyPicker
               value={status}
               options={TASK_STATUSES.map((value) => ({
                 value,
                 label: taskStatusLabel(language, value),
-                icon: <StatusIcon status={value} />,
-                className: `status-icon-${STATUS_DETAILS[value].tone}`,
+                icon: <StatusIcon status={value} color="currentColor" size={14} />,
               }))}
               open={menu === "status"}
               triggerClassName="property-control property-status"
@@ -579,7 +594,7 @@ export function TaskEditor({
               options={TASK_PRIORITIES.map((value) => ({
                 value,
                 label: taskPriorityLabel(language, value),
-                icon: <LinearPriorityIcon priority={value} />,
+                icon: <PriorityIcon priority={value} size={14} />,
                 className: `priority-${value}`,
               }))}
               open={menu === "priority"}
@@ -625,16 +640,19 @@ export function TaskEditor({
                   label: developmentScanLoading
                     ? text("正在扫描 Git…", "Scanning Git…")
                     : text("分支 / Worktree", "Branch / worktree"),
-                  icon: <LinearIcon name="branch" />,
+                  icon: <BranchIcon color="currentColor" size={14} />,
                 },
                 ...developmentOptions.map((context) => ({
                   value: contextValue(context),
                   label: contextLabel(context, text),
-                  icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                  icon: context.type === "branch"
+                    ? <BranchIcon color="currentColor" size={14} />
+                    : <LinearIcon name="folder" />,
                 })),
               ]}
               open={menu === "development"}
               disabled={developmentScanLoading}
+              popoverClassName="development-context-popover"
               triggerClassName="property-control property-development"
               ariaLabel={text("代码分支或 Worktree", "Code branch or worktree")}
               title={developmentScan.workspacePath ?? undefined}
@@ -691,7 +709,7 @@ export function TaskEditor({
             })}
 
             <div className="composer-menu-anchor" ref={moreMenuRef}>
-              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={toggleMoreMenu}><LinearIcon name="more" /></button>
+              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={toggleMoreMenu}><MoreIcon color="currentColor" /></button>
               {menu === "more" && (
                 <div
                   className="composer-popover more-popover"
@@ -704,29 +722,23 @@ export function TaskEditor({
                     left: "auto",
                   } : undefined}
                 >
-                  <button type="button" onClick={() => setMenu("due")}><span><LinearIcon name="calendarAdd" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
-                  <button type="button" onClick={() => setMenu("recurrence")}><span><LinearIcon name="recurrence" /></span><strong>{text("设置重复…", "Set recurrence…")}</strong><b><LinearIcon name="chevronRight" /></b></button>
+                  <button type="button" onClick={() => setMenu("due")}><span><DueDateIcon color="currentColor" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
+                  <button type="button" onClick={() => setMenu("recurrence")}><span><RecurrenceIcon color="currentColor" /></span><strong>{text("设置重复…", "Set recurrence…")}</strong><b><LinearIcon name="chevronRight" /></b></button>
                   {!task && (
                     <>
                       <div className="more-popover-divider" />
-                      <button className={relationMenu === "subIssue" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "subIssue"} onClick={() => setRelationMenu("subIssue")}><span><LinearIcon name="plus" /></span><strong>{text("添加子议题", "Add sub-issue")}</strong>{selectedSubIssues.length > 0 && <small>{text(`${selectedSubIssues.length} 个已选`, `${selectedSubIssues.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
-                      <button className={relationMenu === "parent" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "parent"} onClick={() => setRelationMenu("parent")}><span><LinearIcon name="plus" /></span><strong>{text("添加父议题", "Add parent issue")}</strong>{selectedParent && <small>{selectedParent.externalKey ?? selectedParent.identifier}</small>}<b><LinearIcon name="chevronRight" /></b></button>
-                      <button className={relationMenu === "related" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "related"} onClick={() => setRelationMenu("related")}><span><LinearIcon name="link" /></span><strong>{text("添加关联议题", "Add related issue")}</strong>{selectedRelated.length > 0 && <small>{text(`${selectedRelated.length} 个已选`, `${selectedRelated.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "subIssue" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "subIssue"} onClick={() => setRelationMenu("subIssue")}><span><PlusIcon color="currentColor" size={16} /></span><strong>{text("添加子议题", "Add sub-issue")}</strong>{selectedSubIssues.length > 0 && <small>{text(`${selectedSubIssues.length} 个已选`, `${selectedSubIssues.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "parent" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "parent"} onClick={() => setRelationMenu("parent")}><span><PlusIcon color="currentColor" size={16} /></span><strong>{text("添加父议题", "Add parent issue")}</strong>{selectedParent && <small>{selectedParent.externalKey ?? selectedParent.identifier}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "related" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "related"} onClick={() => setRelationMenu("related")}><span><RelationIcon color="currentColor" size={16} /></span><strong>{text("添加关联议题", "Add related issue")}</strong>{selectedRelated.length > 0 && <small>{text(`${selectedRelated.length} 个已选`, `${selectedRelated.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
                       {relationMenu && (
-                        <div className="task-create-relation-submenu" role="menu" aria-label={text("选择关系议题", "Select relation issue")}>
-                          {relationCandidates.length > 0 ? relationCandidates.map((candidate) => {
-                            const selected = selectedRelationIds.has(candidate.id);
-                            return (
-                              <button className={selected ? "is-selected" : undefined} type="button" role="menuitemcheckbox" aria-checked={selected} key={candidate.id} onClick={() => toggleDraftRelation(candidate)}>
-                                <StatusIcon status={candidate.status} />
-                                <span className="issue-relation-option-id">{candidate.externalKey ?? candidate.identifier}</span>
-                                <span className="issue-relation-option-title">{candidate.title}</span>
-                                <span className="task-create-relation-check">{selected && <LinearIcon name="check" />}</span>
-                              </button>
-                            );
-                          }) : (
-                            <p className="issue-relation-empty">{text("没有可选议题", "No issues available")}</p>
-                          )}
+                        <div className="issue-relation-popover task-create-relation-submenu" aria-label={text("选择关系议题", "Select relation issue")}>
+                          <IssuePickerContent
+                            key={relationMenu}
+                            candidates={relationCandidates}
+                            selectedIds={selectedRelationIds}
+                            onEscape={() => setRelationMenu(null)}
+                            onSelect={toggleDraftRelation}
+                          />
                         </div>
                       )}
                     </>
@@ -770,9 +782,9 @@ export function TaskEditor({
             {!task && (
               <>
                 <button className="composer-attach-icon" type="button" disabled={saving} onClick={() => attachmentInputRef.current?.click()} aria-label={text("上传附件", "Upload attachments")}>
-                  <LinearIcon name="attachment" />{attachments.length > 0 && <span>{attachments.length}</span>}
+                  <AttachmentIcon color="currentColor" />
                 </button>
-                <input ref={attachmentInputRef} type="file" multiple hidden onChange={(event) => { if (event.currentTarget.files) addAttachments(event.currentTarget.files); event.currentTarget.value = ""; }} />
+                <input ref={attachmentInputRef} type="file" multiple hidden onChange={(event) => { if (event.currentTarget.files) descriptionComposerRef.current?.addFiles(event.currentTarget.files); event.currentTarget.value = ""; }} />
               </>
             )}
             {task && <span aria-hidden="true" />}

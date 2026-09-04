@@ -20,6 +20,7 @@ function parseHostRequest(payload, parseAutomationRequest) {
   ) ? request.id : null;
   if (!id) return { id: null, request: null, error: HOST_REQUEST_ERROR };
   if (request.action === "ensure") return { id, request, error: null };
+  if (request.action === "read-current-user") return { id, request, error: null };
   if (
     request.action === "load-frame"
     && typeof request.frameName === "string"
@@ -69,9 +70,15 @@ function parseHostRequest(payload, parseAutomationRequest) {
     && request.codexHostId.length > 0
     && request.codexHostId.length <= 240
     && !/[\u0000-\u001f\u007f]/.test(request.codexHostId)
-    && typeof request.targetRoot === "string"
-    && request.targetRoot.length > 0
-    && request.targetRoot.length <= 4_096
+    && typeof request.projectless === "boolean"
+    && (
+      request.projectless
+      || (
+        typeof request.targetRoot === "string"
+        && request.targetRoot.length > 0
+        && request.targetRoot.length <= 4_096
+      )
+    )
     && typeof request.instruction === "string"
     && request.instruction.length > 0
     && request.instruction.length <= 4_000_000
@@ -108,6 +115,8 @@ export async function handleHostBindingPayload(params, handlers) {
     let result;
     if (parsed.request.action === "ensure") {
       result = await handlers.ensure();
+    } else if (parsed.request.action === "read-current-user") {
+      result = await handlers.readCurrentUser();
     } else if (parsed.request.action === "load-frame") {
       result = await handlers.loadFrame(parsed.request);
     } else if (parsed.request.action === "open-external") {
