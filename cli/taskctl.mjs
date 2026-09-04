@@ -49,6 +49,7 @@ const COMMAND_OPTIONS = new Map([
       "status",
       "priority",
       "labels",
+      "assignee",
       "thread-id",
       "git-branch",
       "worktree-path",
@@ -70,6 +71,7 @@ const COMMAND_OPTIONS = new Map([
       "status",
       "priority",
       "labels",
+      "assignee",
       "thread-id",
       "git-branch",
       "worktree-path",
@@ -157,7 +159,7 @@ Actions:
   get ISSUE_ID [--json]
   create --project PROJECT_ID --title TITLE
     [--description TEXT | --description-file FILE]
-    [--status STATUS] [--priority PRIORITY] [--labels a,b]
+    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER]
     [--thread-id ID]
     [--git-branch BRANCH | --worktree-path PATH [--worktree-branch BRANCH]]
     [--start-date YYYY-MM-DD] [--due-date YYYY-MM-DD]
@@ -165,7 +167,7 @@ Actions:
   update ISSUE_ID
     [--project PROJECT_ID] [--title TITLE]
     [--description TEXT | --description-file FILE]
-    [--status STATUS] [--priority PRIORITY] [--labels a,b]
+    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER]
     [--thread-id ID]
     [--git-branch BRANCH | --worktree-path PATH [--worktree-branch BRANCH]]
     [--start-date YYYY-MM-DD] [--due-date YYYY-MM-DD]
@@ -871,6 +873,7 @@ async function createIssue(api, options, overrides) {
   const developmentContext = developmentContextFromOptions(options, overrides);
   const recurrence = recurrenceFromOptions(options);
   const threadId = resolveThreadId(options, overrides);
+  const assigneeTarget = await resolveAssigneeTarget(api, options.assignee);
   return api.request("POST", "/api/tasks", {
     projectId: requiredOption(options, "project"),
     title: requiredOption(options, "title"),
@@ -879,6 +882,7 @@ async function createIssue(api, options, overrides) {
     priority,
     labels: parseLabels(options.labels),
     threadId,
+    ...optionalField("assigneeTarget", assigneeTarget),
     ...optionalField("developmentContext", developmentContext),
     ...optionalField("startDate", options["start-date"]),
     ...optionalField("dueDate", options["due-date"]),
@@ -893,12 +897,14 @@ async function updateIssue(api, taskId, options, overrides) {
   const developmentContext = developmentContextFromOptions(options, overrides);
   const recurrence = recurrenceFromOptions(options);
   const threadId = resolveThreadId(options, overrides);
+  const assigneeTarget = await resolveAssigneeTarget(api, options.assignee);
   const patch = {
     ...optionalField("projectId", options.project),
     ...optionalField("title", options.title),
     ...optionalField("status", options.status),
     ...optionalField("priority", options.priority),
     ...optionalField("labels", options.labels === undefined ? undefined : parseLabels(options.labels)),
+    ...optionalField("assigneeTarget", assigneeTarget),
     ...optionalField("developmentContext", developmentContext),
     ...optionalField("startDate", options["start-date"]),
     ...optionalField("dueDate", options["due-date"]),
@@ -914,6 +920,33 @@ async function updateIssue(api, taskId, options, overrides) {
   patch.threadId = threadId;
   patch.version = await resolveVersion(api, taskId, options["if-version"]);
   return api.request("PATCH", taskPath(taskId), patch);
+}
+
+async function resolveAssigneeTarget(api, rawAssignee) {
+  if (rawAssignee === undefined) return undefined;
+  const value = rawAssignee.trim();
+  if (!value) throw usageError("--assignee cannot be empty");
+  if (value === "current-user" || value === "codex-agent") return value;
+
+  const response = await api.request("GET", "/api/members");
+  const members = Array.isArray(response.members)
+    ? response.members.filter((member) => member?.active === true)
+    : [];
+  const normalized = value.normalize("NFKC").toLocaleLowerCase("en-US");
+  const idMatch = members.find((member) => member.id === value || `member:${member.id}` === value);
+  const usernameMatch = members.find((member) => (
+    member.username.normalize("NFKC").toLocaleLowerCase("en-US") === normalized
+  ));
+  const displayMatches = members.filter((member) => (
+    member.displayName.normalize("NFKC").toLocaleLowerCase("en-US") === normalized
+  ));
+  const member = idMatch ?? usernameMatch ?? (displayMatches.length === 1 ? displayMatches[0] : null);
+  if (!member) {
+    throw usageError(displayMatches.length > 1
+      ? `Member name '${value}' is ambiguous; use the exact username or member id`
+      : `Active member '${value}' does not exist`);
+  }
+  return `member:${member.id}`;
 }
 
 async function moveIssue(api, taskId, options, overrides) {

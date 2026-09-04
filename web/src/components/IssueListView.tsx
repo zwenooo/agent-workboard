@@ -1,9 +1,9 @@
 import { useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
-import { assigneeTargetForActor } from "../actors";
+import { CODEX_AGENT_ACTOR, assigneeTargetForActor } from "../actors";
 import { taskPriorityLabel, taskStatusLabel, useTaskboardI18n } from "../i18n";
 import { labelPresentation } from "../labels";
 import type { TaskCardPresentation } from "../taskConversations";
-import { TASK_PRIORITIES, TASK_STATUSES, type ActorIdentity, type Task, type TaskDraft, type TaskStatus } from "../types";
+import { TASK_PRIORITIES, TASK_STATUSES, type ActorIdentity, type AssigneeTarget, type Task, type TaskDraft, type TaskStatus } from "../types";
 import { ActorAvatar } from "./ActorAvatar";
 import { LinearIcon } from "./LinearIcon";
 import { DueDateIcon, PriorityIcon, StatusIcon } from "./SemanticIcons";
@@ -17,6 +17,7 @@ interface IssueListViewProps {
   tasks: Task[];
   presentations: Record<string, TaskCardPresentation>;
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   hasActiveFilters: boolean;
   onOpenTask: (task: Task) => void;
   onOpenConversation: (conversation: TaskCardPresentation["conversations"][number]) => void;
@@ -37,6 +38,7 @@ export function IssueListView({
   tasks,
   presentations,
   currentUser,
+  assigneeMembers,
   hasActiveFilters,
   onOpenTask,
   onOpenConversation,
@@ -78,6 +80,8 @@ export function IssueListView({
                 <div className="issue-list-rows">
                   {statusTasks.length ? statusTasks.map((task) => {
                     const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "current-user";
+                    const assigneeOptions = [currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
+                      .filter((actor, index, actors) => actors.findIndex((candidate) => `${candidate.type}:${candidate.id}` === `${actor.type}:${actor.id}`) === index);
                     const displayIdentifier = task.externalKey ?? task.identifier;
                     return (
                       <div
@@ -150,10 +154,13 @@ export function IssueListView({
                               aria-label={text(`${displayIdentifier} 负责人`, `${displayIdentifier} assignee`)}
                               value={assigneeTarget}
                               disabled={task.source === "jira"}
-                              onChange={(event) => void onUpdate(task, { assigneeTarget: event.target.value as "current-user" | "codex-agent" }).catch(() => {})}
+                              onChange={(event) => void onUpdate(task, { assigneeTarget: event.target.value as AssigneeTarget }).catch(() => {})}
                             >
-                              <option value="current-user">{currentUser.name}</option>
-                              <option value="codex-agent">Codex Agent</option>
+                              {assigneeOptions.map((actor) => (
+                                <option key={`${actor.type}:${actor.id}`} value={assigneeTargetForActor(actor, currentUser) ?? "current-user"}>
+                                  {actor.id === currentUser.id ? `${actor.name}${text("（我）", " (me)")}` : actor.name}
+                                </option>
+                              ))}
                             </select>
                           </label>
                         </span>

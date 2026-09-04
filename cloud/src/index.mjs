@@ -371,11 +371,15 @@ function parseThreadBinding(value) {
 
 function parseAssigneeTarget(value) {
   if (value === undefined) return undefined;
-  if (!["current-user", "codex-agent"].includes(value)) {
+  if (
+    value !== "current-user"
+    && value !== "codex-agent"
+    && !(typeof value === "string" && /^member:[0-9a-f-]{36}$/i.test(value))
+  ) {
     throw new ApiError(
       400,
       "INVALID_FIELD",
-      "'assigneeTarget' must be current-user or codex-agent",
+      "'assigneeTarget' must be current-user, codex-agent, or an active member",
     );
   }
   return value;
@@ -709,8 +713,20 @@ async function authenticate(request, env) {
   return actorFromMember(member, request, "basic");
 }
 
-function resolveAssignee(target, actor) {
+async function resolveAssignee(target, actor, env) {
   if (target === undefined || target === "current-user") return actor;
+  if (target.startsWith("member:")) {
+    const member = await env.DB.prepare(`
+      SELECT id, display_name FROM members WHERE id = ? AND active = 1
+    `).bind(target.slice("member:".length)).first();
+    if (!member) throw new ApiError(404, "MEMBER_NOT_FOUND", "Active member not found");
+    return {
+      type: "user",
+      id: `member:${member.id}`,
+      name: member.display_name,
+      avatarUrl: null,
+    };
+  }
   const userId = actor.memberId
     ? `member:${actor.memberId}`
     : `basic:${encodeURIComponent(actor.username.toLowerCase())}`;
@@ -1914,7 +1930,7 @@ async function createTask(env, input, actor) {
   }
   const id = uuid();
   const timestamp = now();
-  const assignee = resolveAssignee(input.assigneeTarget, actor);
+  const assignee = await resolveAssignee(input.assigneeTarget, actor, env);
   const results = await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO tasks (
@@ -2105,7 +2121,7 @@ async function updateTask(env, id, input, actor) {
     values.push(row?.minimum == null ? 1000 : row.minimum - 1000);
   }
   if (input.assigneeTarget !== undefined) {
-    const assignee = resolveAssignee(input.assigneeTarget, actor);
+    const assignee = await resolveAssignee(input.assigneeTarget, actor, env);
     activityValues.assignee = assignee;
     assignments.push(
       "assignee_type = ?",
@@ -3386,16 +3402,18 @@ async function routeAuth(request, env, actor, url) {
 }
 
 async function routeMembers(request, env, actor, url) {
-  requireAdminActor(actor);
   requireNoQuery(url, `${request.method} ${url.pathname}`);
 
   if (url.pathname === "/api/members") {
     if (request.method === "GET") {
       const { results } = await env.DB.prepare(`
-        SELECT * FROM members ORDER BY active DESC, role ASC, display_name COLLATE NOCASE
+        SELECT * FROM members
+        ${actor.role === "admin" ? "" : "WHERE active = 1"}
+        ORDER BY active DESC, role ASC, display_name COLLATE NOCASE
       `).all();
       return json(200, { members: results.map(memberPublic) });
     }
+    requireAdminActor(actor);
     if (request.method === "POST") {
       const body = await readJson(request);
       assertPlainObject(body);
@@ -3405,6 +3423,7 @@ async function routeMembers(request, env, actor, url) {
     methodNotAllowed(["GET", "POST"]);
   }
 
+  requireAdminActor(actor);
   const match = /^\/api\/members\/([^/]+)$/.exec(url.pathname);
   if (!match) throw new ApiError(404, "NOT_FOUND", "Member route not found");
   if (request.method !== "PATCH") methodNotAllowed(["PATCH"]);

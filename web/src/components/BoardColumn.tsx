@@ -35,6 +35,7 @@ interface BoardColumnProps {
   availableLabels: string[];
   projectNames?: Record<string, string>;
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   showCover: boolean;
   showBody: boolean;
   createEnabled?: boolean;
@@ -67,6 +68,7 @@ export function BoardColumn({
   availableLabels,
   projectNames,
   currentUser,
+  assigneeMembers,
   showCover,
   showBody,
   createEnabled = true,
@@ -186,6 +188,7 @@ export function BoardColumn({
               availableLabels={availableLabels}
               projectName={projectNames?.[task.projectId]}
               currentUser={currentUser}
+              assigneeMembers={assigneeMembers}
               showCover={showCover}
               showBody={showBody}
               onCreateLabel={(label) => onCreateLabel(label, task.projectId)}

@@ -107,6 +107,7 @@ interface TaskEditorProps {
   initialDraft: NewTaskEditorDraft | null;
   labels: string[];
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   developmentScan: DevelopmentScan;
   developmentScanLoading: boolean;
   onCreateLabel: (label: string) => Promise<void>;
@@ -166,6 +167,7 @@ export function TaskEditor({
   initialDraft,
   labels: availableLabels,
   currentUser,
+  assigneeMembers,
   developmentScan,
   developmentScanLoading,
   onCreateLabel,
@@ -267,7 +269,7 @@ export function TaskEditor({
         : subIssueIds,
   );
 
-  const assigneeOptions = [task?.assignee, currentUser, CODEX_AGENT_ACTOR]
+  const assigneeOptions = [task?.assignee, currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
     .filter((actor): actor is ActorIdentity => actor !== undefined)
     .filter((actor, index, actors) => (
       actors.findIndex((candidate) => actorKey(candidate) === actorKey(actor)) === index

@@ -147,6 +147,7 @@ interface OtherTasksPanelProps {
   availableLabels: string[];
   projectNames?: Record<string, string>;
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   showCover: boolean;
   showBody: boolean;
   onCreateLabel: (label: string, projectId?: string) => Promise<void>;
@@ -184,6 +185,7 @@ export function OtherTasksPanel({
   availableLabels,
   projectNames,
   currentUser,
+  assigneeMembers,
   showCover,
   showBody,
   onCreateLabel,
@@ -351,6 +353,7 @@ export function OtherTasksPanel({
               availableLabels={availableLabels}
               projectName={projectNames?.[task.projectId]}
               currentUser={currentUser}
+              assigneeMembers={assigneeMembers}
               showCover={showCover}
               showBody={showBody}
               onCreateLabel={(label) => onCreateLabel(label, task.projectId)}

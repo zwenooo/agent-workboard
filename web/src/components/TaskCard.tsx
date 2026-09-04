@@ -40,6 +40,7 @@ interface TaskCardProps {
   availableLabels: string[];
   projectName?: string;
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   showCover: boolean;
   showBody: boolean;
   onCreateLabel: (label: string) => Promise<void>;
@@ -339,6 +340,7 @@ function AssigneeControl({
   task,
   participants: persistedParticipants,
   currentUser,
+  assigneeMembers,
   disabled,
   open,
   onOpenChange,
@@ -347,6 +349,7 @@ function AssigneeControl({
   task: Task;
   participants: ActorIdentity[];
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   disabled: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -359,7 +362,7 @@ function AssigneeControl({
   const participants = persistedParticipants.map((participant) => (
     actorKey(participant) === currentUserKey ? currentUser : participant
   ));
-  const options = [assignee, currentUser, CODEX_AGENT_ACTOR]
+  const options = [assignee, currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
     .filter((actor, index, actors) => (
       actors.findIndex((candidate) => actorKey(candidate) === actorKey(actor)) === index
     ));
@@ -401,6 +404,7 @@ export function TaskCard({
   availableLabels,
   projectName,
   currentUser,
+  assigneeMembers,
   showCover,
   showBody,
   onCreateLabel,
@@ -511,6 +515,7 @@ export function TaskCard({
               task={task}
               participants={task.participants.length ? task.participants : [creator]}
               currentUser={currentUser}
+              assigneeMembers={assigneeMembers}
               disabled={propertyDisabled || task.source === "jira"}
               open={propertyMenu === "assignee"}
               onOpenChange={(open) => setPropertyMenu(open ? "assignee" : null)}
@@ -575,6 +580,7 @@ export function TaskCard({
               task={task}
               participants={task.participants}
               currentUser={currentUser}
+              assigneeMembers={assigneeMembers}
               disabled={propertyDisabled || task.source === "jira"}
               open={propertyMenu === "assignee"}
               onOpenChange={(open) => setPropertyMenu(open ? "assignee" : null)}

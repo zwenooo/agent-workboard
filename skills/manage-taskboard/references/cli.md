@@ -74,6 +74,7 @@ taskctl issue create \
   [--status STATUS] \
   [--priority PRIORITY] \
   [--labels a,b] \
+  [--assignee MEMBER] \
   [--thread-id ID] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \
@@ -86,7 +87,7 @@ taskctl issue create \
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, and `canceled`. Priorities are `none`, `urgent`, `high`, `medium`, and `low`.
 
-Issues created through `taskctl` are assigned to Codex Agent by default. Other CLI writes preserve the existing assignee.
+Issues created through `taskctl` are assigned to Codex Agent by default. Pass `--assignee` with an active member's exact username, display name, or id to assign it to that member. `current-user` and `codex-agent` are also accepted. Other CLI writes preserve the existing assignee.
 
 ## Update issues
 
@@ -100,6 +101,7 @@ taskctl issue update ID \
   [--status STATUS] \
   [--priority PRIORITY] \
   [--labels a,b] \
+  [--assignee MEMBER] \
   [--thread-id ID] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \

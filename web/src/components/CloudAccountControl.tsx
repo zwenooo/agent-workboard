@@ -1,17 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useCloudAuth } from "../AuthGateway";
-
-interface ManagedMember {
-  id: string;
-  username: string;
-  displayName: string;
-  role: "admin" | "member";
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastLoginAt: string | null;
-}
+import type { TaskboardMember } from "../types";
 
 async function memberRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -35,7 +25,7 @@ export function CloudAccountControl() {
   const chinese = navigator.language.toLowerCase().startsWith("zh");
   const text = (zh: string, en: string) => chinese ? zh : en;
   const [open, setOpen] = useState(false);
-  const [members, setMembers] = useState<ManagedMember[]>([]);
+  const [members, setMembers] = useState<TaskboardMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -59,7 +49,7 @@ export function CloudAccountControl() {
     setLoadingMembers(true);
     setError("");
     try {
-      const data = await memberRequest<{ members: ManagedMember[] }>("/api/members");
+      const data = await memberRequest<{ members: TaskboardMember[] }>("/api/members");
       setMembers(data.members);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : text("成员读取失败", "Failed to load members"));
@@ -80,7 +70,7 @@ export function CloudAccountControl() {
     setError("");
     setNotice("");
     try {
-      const data = await memberRequest<{ member: ManagedMember }>("/api/members", {
+      const data = await memberRequest<{ member: TaskboardMember }>("/api/members", {
         method: "POST",
         body: JSON.stringify({
           username: newUsername,
@@ -108,7 +98,7 @@ export function CloudAccountControl() {
     setError("");
     setNotice("");
     try {
-      const data = await memberRequest<{ member: ManagedMember }>(`/api/members/${encodeURIComponent(memberId)}`, {
+      const data = await memberRequest<{ member: TaskboardMember }>(`/api/members/${encodeURIComponent(memberId)}`, {
         method: "PATCH",
         body: JSON.stringify(changes),
       });

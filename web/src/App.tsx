@@ -32,6 +32,7 @@ import {
   listArchivedTasks,
   listDevelopmentContexts,
   listDeviceWorkspaces,
+  listMembers,
   listProjects,
   listTasks,
   moveTask as moveTaskRequest,
@@ -48,6 +49,7 @@ import {
 } from "./api";
 import {
   actorKey,
+  actorForMember,
   actorForAssigneeTarget,
   assigneeTargetForActor,
 } from "./actors";
@@ -139,6 +141,7 @@ import {
   type Project,
   type Task,
   type TaskboardMetadata,
+  type TaskboardMember,
   type TaskDraft,
   type TaskStatus,
 } from "./types";
@@ -744,6 +747,7 @@ export function App() {
   const [recentProjectIds, setRecentProjectIds] = useState(readRecentProjectIds);
   const initialProjectId = query.get("project") ?? recentProjectIds[0] ?? ALL_PROJECTS_ID;
   const [projects, setProjects] = useState<Project[]>([]);
+  const [assigneeMembers, setAssigneeMembers] = useState<TaskboardMember[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
@@ -1000,6 +1004,10 @@ export function App() {
     ...DEFAULT_USER_ACTOR,
     name: text("本地用户", "Local user"),
   };
+  const assigneeOptions = useMemo(
+    () => assigneeMembers.filter((member) => member.active).map(actorForMember),
+    [assigneeMembers],
+  );
   const selectedDeviceWorkspacePath = selectedProjectId === GLOBAL_PROJECT_ID || isAllProjects
     ? undefined
     : deviceWorkspacePaths[selectedProjectId];
@@ -1866,10 +1874,11 @@ export function App() {
       current?.operation === "initial" ? { ...current, requestId } : current
     ));
     try {
-      const [nextProjects, metadata, workspaces] = await Promise.all([
+      const [nextProjects, metadata, workspaces, nextAssigneeMembers] = await Promise.all([
         listProjects(signal),
         getTaskboardMetadata(signal),
         listDeviceWorkspaces(signal),
+        listMembers(signal),
       ]);
       if (requestId !== projectsRequestRef.current) return;
       const [nextJiraConnection, nextTemporaryTasks] = await Promise.all([
@@ -1889,6 +1898,7 @@ export function App() {
           : metadata
       ));
       setManageTaskboardSkillPath(metadata.manageTaskboardSkillPath ?? "");
+      setAssigneeMembers(nextAssigneeMembers);
       setLocalAiChatAvailable(metadata.capabilities?.localAiChat === true);
       setDeviceWorkspacePaths((current) => {
         const next = { ...current, ...workspaces };
@@ -1943,11 +1953,13 @@ export function App() {
       current?.operation === "refresh" ? { ...current, requestId } : current
     ));
     try {
-      const [nextProjects, nextTemporaryTasks] = await Promise.all([
+      const [nextProjects, nextTemporaryTasks, nextAssigneeMembers] = await Promise.all([
         listProjects(),
         listTasks(GLOBAL_PROJECT_ID),
+        listMembers(),
       ]);
       if (requestId !== projectsRequestRef.current) return;
+      setAssigneeMembers(nextAssigneeMembers);
       setProjects(nextProjects.map((project) => project.id === GLOBAL_PROJECT_ID
         ? {
             ...project,
@@ -2664,7 +2676,7 @@ export function App() {
     const previous = task;
     const { assigneeTarget, ...taskChanges } = changes;
     const optimisticAssignee = assigneeTarget
-      ? actorForAssigneeTarget(assigneeTarget, currentUser)
+      ? actorForAssigneeTarget(assigneeTarget, currentUser, assigneeOptions)
       : task.assignee;
     const optimisticParticipants = assigneeTarget
       && !task.participants.some((participant) => actorKey(participant) === actorKey(optimisticAssignee))
@@ -3742,6 +3754,7 @@ export function App() {
             tasks={tasks.filter((task) => task.projectId === detailTask.projectId)}
             referenceTasks={referenceTasks.filter((task) => task.projectId === detailTask.projectId)}
             currentUser={currentUser}
+            assigneeMembers={assigneeOptions}
             availableLabels={availableLabels}
             developmentScan={developmentScan}
             developmentScanLoading={developmentScanLoading}
@@ -3833,6 +3846,7 @@ export function App() {
             tasks={filteredTasks}
             presentations={taskPresentations}
             currentUser={currentUser}
+            assigneeMembers={assigneeOptions}
             hasActiveFilters={hasActiveTaskFilters}
             onOpenTask={openTaskDetail}
             onOpenConversation={openTaskConversation}
@@ -3906,6 +3920,7 @@ export function App() {
                         availableLabels={availableLabels}
                         projectNames={isAllProjects ? projectNames : undefined}
                         currentUser={currentUser}
+                        assigneeMembers={assigneeOptions}
                         showCover={boardDisplaySettings.cover}
                         showBody={boardDisplaySettings.body}
                         createEnabled={!isJiraProject}
@@ -3943,6 +3958,7 @@ export function App() {
                     availableLabels={availableLabels}
                     projectNames={isAllProjects ? projectNames : undefined}
                     currentUser={currentUser}
+                    assigneeMembers={assigneeOptions}
                     showCover={boardDisplaySettings.cover}
                     showBody={boardDisplaySettings.body}
                     onCreateLabel={persistProjectLabel}
@@ -4197,6 +4213,7 @@ export function App() {
             : newTaskDraft.draft}
           labels={projects.find((project) => project.id === editorProjectId)?.labels ?? []}
           currentUser={currentUser}
+          assigneeMembers={assigneeOptions}
           developmentScan={developmentScan}
           developmentScanLoading={developmentScanLoading}
           onCreateLabel={(label) => persistProjectLabel(label, editorProjectId ?? selectedProjectId)}

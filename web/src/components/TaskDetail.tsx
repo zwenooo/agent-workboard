@@ -105,6 +105,7 @@ interface TaskDetailProps {
   tasks: Task[];
   referenceTasks: Task[];
   currentUser: ActorIdentity;
+  assigneeMembers: ActorIdentity[];
   availableLabels: string[];
   developmentScan: DevelopmentScan;
   developmentScanLoading: boolean;
@@ -374,6 +375,7 @@ export function TaskDetail({
   tasks,
   referenceTasks,
   currentUser,
+  assigneeMembers,
   availableLabels,
   developmentScan,
   developmentScanLoading,
@@ -996,7 +998,7 @@ export function TaskDetail({
     && currentTask.assignee.id === currentUser.id
     ? currentUser
     : currentTask.assignee;
-  const assigneeOptions = [displayAssignee, currentUser, CODEX_AGENT_ACTOR]
+  const assigneeOptions = [displayAssignee, currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
     .filter((actor, index, actors) => (
       actors.findIndex((candidate) => actorKey(candidate) === actorKey(actor)) === index
     ));

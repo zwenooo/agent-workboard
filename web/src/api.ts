@@ -27,6 +27,7 @@ import type {
   Task,
   TaskChangeActivity,
   TaskboardMetadata,
+  TaskboardMember,
   TaskDraft,
   TaskStatus,
 } from "./types";
@@ -212,6 +213,16 @@ export async function getProjectSummary(
 
 export async function getTaskboardMetadata(signal?: AbortSignal): Promise<TaskboardMetadata> {
   return request<TaskboardMetadata>("/api/meta", { signal });
+}
+
+export async function listMembers(signal?: AbortSignal): Promise<TaskboardMember[]> {
+  try {
+    const data = await request<{ members: TaskboardMember[] }>("/api/members", { signal });
+    return data.members;
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return [];
+    throw error;
+  }
 }
 
 export async function getTaskboardRevision(
