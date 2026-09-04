@@ -213,8 +213,8 @@ function contextLabel(
   text: (chinese: string, english: string) => string,
 ): string {
   if (context.type === "branch") return context.branch;
-  const folder = context.path.split(/[\\/]/).filter(Boolean).at(-1) ?? context.path;
-  return `${context.branch ?? text("分离 HEAD", "detached")} · ${folder}`;
+  const folder = context.path?.split(/[\\/]/).filter(Boolean).at(-1);
+  return `${context.branch ?? text("分离 HEAD", "detached")}${folder ? ` · ${folder}` : ` · ${text("工作树", "worktree")}`}`;
 }
 
 const ACTIVITY_FIELD_LABELS: Record<string, readonly [string, string]> = {
@@ -1783,7 +1783,9 @@ export function TaskDetail({
                 popoverClassName="development-context-popover"
                 triggerClassName="detail-property-trigger"
                 ariaLabel={text("开发上下文", "Development context")}
-                title={currentTask.developmentContext?.type === "worktree" ? currentTask.developmentContext.path : undefined}
+                title={currentTask.developmentContext?.type === "worktree" && currentTask.developmentContext.path
+                  ? currentTask.developmentContext.path
+                  : undefined}
                 onOpenChange={(open) => setPropertyMenu(open ? "development" : null)}
                 onChange={(value) => void saveTask({
                   developmentContext: value ? JSON.parse(value) as DevelopmentContext : null,
