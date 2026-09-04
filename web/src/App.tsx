@@ -1874,10 +1874,13 @@ export function App() {
       current?.operation === "initial" ? { ...current, requestId } : current
     ));
     try {
-      const [nextProjects, metadata, workspaces, nextAssigneeMembers] = await Promise.all([
+      const metadata = await getTaskboardMetadata(signal);
+      if (requestId !== projectsRequestRef.current) return;
+      const [nextProjects, workspaces, nextAssigneeMembers] = await Promise.all([
         listProjects(signal),
-        getTaskboardMetadata(signal),
-        listDeviceWorkspaces(signal),
+        metadata.localCapabilities?.available === false
+          ? Promise.resolve<Record<string, string>>({})
+          : listDeviceWorkspaces(signal),
         listMembers(signal),
       ]);
       if (requestId !== projectsRequestRef.current) return;
