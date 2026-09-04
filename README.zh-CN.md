@@ -46,7 +46,7 @@ npm run taskctl -- issue create \
   --labels product,mvp
 ```
 
-请运行 `npm link`，以便在 shell 路径中使用 `taskctl`。设置 `CODEX_TASKBOARD_URL`，可让 CLI 指向另一个本地或局域网服务。云端部署通过**回环 companion**（本机 loopback 配套服务，不是「伴侣」）使用 `taskctl cloud login` 配置。
+请运行 `npm link`，以便在 shell 路径中使用 `taskctl`。设置 `CODEX_TASKBOARD_URL`，可让 CLI 指向另一个本地或局域网服务。使用 `--agent codex|claude-code|openclaw|hermes|pi`（或设置 `TASKBOARD_AGENT_KIND`）可将工作归属到实际调用的 Agent。云端部署通过**回环 companion**（本机 loopback 配套服务，不是「伴侣」）使用 `taskctl cloud login` 配置。
 
 ## 安装 Codex Skill
 

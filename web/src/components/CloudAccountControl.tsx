@@ -20,6 +20,12 @@ function initials(value: string) {
   return [...value.trim()].slice(0, 2).join("").toUpperCase() || "TB";
 }
 
+function lastLoginLabel(value: string | null, chinese: boolean) {
+  if (!value) return chinese ? "尚未登录" : "Never signed in";
+  const dateTime = new Date(value).toLocaleString(chinese ? "zh-CN" : "en-US");
+  return chinese ? `上次登录：${dateTime}` : `Last signed in: ${dateTime}`;
+}
+
 export function CloudAccountControl() {
   const auth = useCloudAuth();
   const chinese = navigator.language.toLowerCase().startsWith("zh");
@@ -219,9 +225,7 @@ export function CloudAccountControl() {
                         <span className="member-row-avatar">{initials(member.displayName)}</span>
                         <div className="member-row-identity">
                           <strong>{member.displayName}{member.id === auth.member.id && <em>{text("你", "You")}</em>}</strong>
-                          <span>@{member.username} · {member.lastLoginAt
-                            ? text("已登录", "Signed in")
-                            : text("尚未登录", "Never signed in")}</span>
+                          <span>@{member.username} · {lastLoginLabel(member.lastLoginAt, chinese)}</span>
                         </div>
                         <select
                           aria-label={text(`${member.displayName}的角色`, `Role for ${member.displayName}`)}

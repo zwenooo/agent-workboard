@@ -1,6 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { DEFAULT_LABEL_NAMES } from "../../shared/domain.mjs";
+import {
+  DEFAULT_AGENT_KIND,
+  DEFAULT_LABEL_NAMES,
+  agentActorId,
+  agentActorName,
+  normalizeAgentKind,
+} from "../../shared/domain.mjs";
 
 const JSON_BODY_LIMIT = 1024 * 1024;
 const PROJECT_README_BODY_LIMIT = 3 * 1024 * 1024;
@@ -371,6 +377,15 @@ function parseThreadBinding(value) {
 
 function parseAssigneeTarget(value) {
   if (value === undefined) return undefined;
+  if (typeof value === "string" && value.startsWith("agent:")) {
+    try {
+      const kind = value.slice("agent:".length);
+      if (!kind) throw new TypeError("Agent kind cannot be empty");
+      return `agent:${normalizeAgentKind(kind)}`;
+    } catch {
+      // Fall through to the field error below.
+    }
+  }
   if (
     value !== "current-user"
     && value !== "codex-agent"
@@ -379,7 +394,7 @@ function parseAssigneeTarget(value) {
     throw new ApiError(
       400,
       "INVALID_FIELD",
-      "'assigneeTarget' must be current-user, codex-agent, or an active member",
+      "'assigneeTarget' must be current-user, codex-agent, agent:<kind>, or an active member",
     );
   }
   return value;
@@ -626,18 +641,29 @@ function memberPublic(member) {
   };
 }
 
+function requestAgentKind(request) {
+  try {
+    return normalizeAgentKind(request.headers.get("x-taskboard-agent-kind"), DEFAULT_AGENT_KIND);
+  } catch (error) {
+    throw new ApiError(400, "INVALID_AGENT_KIND", error.message);
+  }
+}
+
 function actorFromMember(member, request, source) {
   const taskctl = source !== "session" && request.headers.get("x-taskboard-client") === "taskctl";
   const userId = `member:${member.id}`;
+  const agentKind = taskctl ? requestAgentKind(request) : null;
   return {
     type: taskctl ? "agent" : "user",
-    id: taskctl ? `${userId}:codex-agent` : userId,
-    name: taskctl ? `Codex Agent (${member.display_name})` : member.display_name,
+    id: taskctl ? agentActorId(agentKind, userId) : userId,
+    name: taskctl ? agentActorName(agentKind, member.display_name) : member.display_name,
     avatarUrl: null,
     username: member.username,
     memberId: member.id,
+    memberDisplayName: member.display_name,
     role: member.role,
     source,
+    agentKind,
   };
 }
 
@@ -727,13 +753,16 @@ async function resolveAssignee(target, actor, env) {
       avatarUrl: null,
     };
   }
+  const agentKind = target === "codex-agent"
+    ? DEFAULT_AGENT_KIND
+    : target.slice("agent:".length);
   const userId = actor.memberId
     ? `member:${actor.memberId}`
     : `basic:${encodeURIComponent(actor.username.toLowerCase())}`;
   return {
     type: "agent",
-    id: `${userId}:codex-agent`,
-    name: `Codex Agent (${actor.name.replace(/^Codex Agent \((.*)\)$/, "$1")})`,
+    id: agentActorId(agentKind, userId),
+    name: agentActorName(agentKind, actor.memberDisplayName),
     avatarUrl: null,
   };
 }
@@ -3292,7 +3321,7 @@ async function routeAuth(request, env, actor, url) {
         ? {
             id: actor.memberId,
             username: actor.username,
-            displayName: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+            displayName: actor.memberDisplayName,
             role: actor.role,
           }
         : null,
@@ -3358,7 +3387,7 @@ async function routeAuth(request, env, actor, url) {
       member: {
         id: actor.memberId,
         username: actor.username,
-        displayName: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+        displayName: actor.memberDisplayName,
         role: actor.role,
       },
       accessToken: access.token,
@@ -3513,7 +3542,7 @@ async function routeApi(request, env, actor, url) {
       currentUser: {
         type: "user",
         id: `member:${actor.memberId}`,
-        name: actor.name.replace(/^Codex Agent \((.*)\)$/, "$1"),
+        name: actor.memberDisplayName,
         avatarUrl: null,
       },
     });

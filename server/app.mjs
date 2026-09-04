@@ -11,11 +11,15 @@ import { promisify } from "node:util";
 import { WebSocket as WebSocketClient, WebSocketServer } from "ws";
 
 import {
+  DEFAULT_AGENT_KIND,
   DEFAULT_PROJECT_ID,
   JIRA_PROJECT_ID,
   TASK_STATUSES,
+  agentActorId,
+  agentActorName,
   isTaskPriority,
   isTaskStatus,
+  normalizeAgentKind,
 } from "../shared/domain.mjs";
 import { resolveCodexExecutable } from "../shared/codex-executable.mjs";
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
@@ -59,8 +63,8 @@ const TRUSTED_EMBED_ORIGINS = new Set(["app://-"]);
 const TRUSTED_ORIGINS_ENV = "CODEX_TASKBOARD_TRUSTED_ORIGINS";
 const CODEX_AGENT_ACTOR = {
   type: "agent",
-  id: "codex-agent",
-  name: "Codex Agent",
+  id: agentActorId(DEFAULT_AGENT_KIND),
+  name: agentActorName(DEFAULT_AGENT_KIND),
   avatarUrl: null,
 };
 const CONTENT_TYPES = new Map([
@@ -582,7 +586,21 @@ function requestHeader(request, name) {
 
 function actorFromRequest(request) {
   if (request.headers["x-taskboard-client"] === "taskctl") {
-    return CODEX_AGENT_ACTOR;
+    let agentKind;
+    try {
+      agentKind = normalizeAgentKind(
+        requestHeader(request, "x-taskboard-agent-kind"),
+        DEFAULT_AGENT_KIND,
+      );
+    } catch (error) {
+      throw new ApiError(400, "INVALID_AGENT_KIND", error.message);
+    }
+    return {
+      type: "agent",
+      id: agentActorId(agentKind),
+      name: agentActorName(agentKind),
+      avatarUrl: null,
+    };
   }
 
   const rawId = requestHeader(request, "x-taskboard-user-id");
@@ -626,15 +644,31 @@ function actorFromRequest(request) {
 
 function parseAssigneeTarget(value) {
   if (value === undefined) return undefined;
-  if (value !== "current-user" && value !== "codex-agent") {
-    throw new ApiError(400, "INVALID_FIELD", "'assigneeTarget' must be current-user or codex-agent");
+  if (value === "current-user" || value === "codex-agent") return value;
+  if (typeof value === "string" && value.startsWith("agent:")) {
+    try {
+      const kind = value.slice("agent:".length);
+      if (!kind) throw new TypeError("Agent kind cannot be empty");
+      return `agent:${normalizeAgentKind(kind)}`;
+    } catch {
+      // Fall through to the field error below.
+    }
   }
-  return value;
+  throw new ApiError(400, "INVALID_FIELD", "'assigneeTarget' must be current-user, codex-agent, or agent:<kind>");
 }
 
 function resolveAssignee(target, actor) {
   if (target === undefined) return actor;
   if (target === "codex-agent") return CODEX_AGENT_ACTOR;
+  if (target.startsWith("agent:")) {
+    const kind = target.slice("agent:".length);
+    return {
+      type: "agent",
+      id: agentActorId(kind),
+      name: agentActorName(kind),
+      avatarUrl: null,
+    };
+  }
   if (actor.type !== "user") {
     throw new ApiError(400, "INVALID_FIELD", "'current-user' requires a user request identity");
   }

@@ -3,6 +3,7 @@ import { Gantt, type GanttStatic, type Task as GanttTask } from "dhtmlx-gantt";
 import "../vendor/dhtmlxgantt.css";
 import type { Task, TaskDraft } from "../types";
 import type { TaskCardPresentation } from "../taskConversations";
+import { agentInitials, agentKindFromActorId, agentLogoPath } from "../actors";
 import { useTaskboardI18n } from "../i18n";
 import { LinearIcon } from "./LinearIcon";
 import { DueDateIcon } from "./SemanticIcons";
@@ -23,6 +24,7 @@ interface TaskboardGanttTask extends GanttTask {
   taskboardTitle: string;
   taskboardUnread: boolean;
   taskboardAssigneeType: Task["assignee"]["type"] | null;
+  taskboardAssigneeId: string;
   taskboardAssigneeName: string;
   taskboardAssigneeAvatarUrl: string | null;
   taskboardAssigneeInitial: string;
@@ -185,8 +187,14 @@ export function GanttView({ tasks, presentations, hasActiveFilters, zoom, hideCo
       const dateLabel = start.getFullYear() === displayEnd.getFullYear()
         ? `${ganttDate(start, i18nRef.current.locale)} — ${ganttDate(displayEnd, i18nRef.current.locale)}`
         : `${ganttDate(start, i18nRef.current.locale, true)} — ${ganttDate(displayEnd, i18nRef.current.locale, true)}`;
-      const avatar = task.taskboardAssigneeType === "agent"
-        ? `<img src="codex-agent-logo.png" alt="">`
+      const agentKind = task.taskboardAssigneeType === "agent"
+        ? agentKindFromActorId(task.taskboardAssigneeId)
+        : null;
+      const agentLogo = agentKind ? agentLogoPath(agentKind) : null;
+      const avatar = agentLogo
+        ? `<img src="${agentLogo}" alt="">`
+        : agentKind
+        ? `<span class="gantt-agent-initials">${escapeHtml(agentInitials(agentKind))}</span>`
         : task.taskboardAssigneeAvatarUrl
         ? `<img src="${escapeHtml(task.taskboardAssigneeAvatarUrl)}" alt="">`
         : `<span>${escapeHtml(task.taskboardAssigneeInitial)}</span>`;
@@ -399,6 +407,7 @@ export function GanttView({ tasks, presentations, hasActiveFilters, zoom, hideCo
         taskboardTitle: groupLabel,
         taskboardUnread: groupTasks.some((task) => presentations[task.id]?.unread),
         taskboardAssigneeType: null,
+        taskboardAssigneeId: "",
         taskboardAssigneeName: "",
         taskboardAssigneeAvatarUrl: null,
         taskboardAssigneeInitial: "",
@@ -424,6 +433,7 @@ export function GanttView({ tasks, presentations, hasActiveFilters, zoom, hideCo
           taskboardTitle: task.title,
           taskboardUnread: presentations[task.id]?.unread ?? false,
           taskboardAssigneeType: task.assignee.type,
+          taskboardAssigneeId: task.assignee.id,
           taskboardAssigneeName: task.assignee.name,
           taskboardAssigneeAvatarUrl: task.assignee.avatarUrl,
           taskboardAssigneeInitial: Array.from(task.assignee.name.trim())[0] ?? "·",

@@ -2,6 +2,8 @@
 
 `taskctl` emits JSON for normal commands. Add `--json` when making the output contract explicit. Built-in help is the only successful stdout exception: it writes plain text, exits with code `0`, and does not request the Taskboard service.
 
+Pass the global `--agent KIND` option on every command so persisted work identifies the actual caller. Built-in kinds are `codex`, `claude-code`, `openclaw`, `hermes`, and `pi`; another Agent may use a stable lowercase slug. `TASKBOARD_AGENT_KIND` supplies the same value when injected. Codex is detected from `CODEX_THREAD_ID`; an otherwise unspecified caller is recorded as the generic `Agent`.
+
 Use built-in help for the current command tree or a specific supported level:
 
 ```bash
@@ -50,7 +52,7 @@ taskctl cloud logout [--json]
 
 `cloud login` reads the member's password from a private `Account password:` prompt. Pass the member's exact account username to `--actor-name`; the Worker returns the verified identity and a revocable access token. The local companion stores the token—not the password—with mode `0600`; project mappings stay on the current device and can differ between collaborators. In cloud mode, failed upstream writes fail rather than falling back to or double-writing the local SQLite database.
 
-Every issue or comment write must be attributed to a Codex conversation. In Codex, `taskctl` reads the current conversation from `CODEX_THREAD_ID`. Outside Codex, pass `--thread-id ID` explicitly. An explicit option takes precedence over the environment. Read commands do not require a conversation id.
+Every issue or comment write must be attributed to its Agent session when one is available. In Codex, `taskctl` reads the current conversation from `CODEX_THREAD_ID`. Other Agents pass a stable session identifier with `--thread-id ID`. An explicit option takes precedence over the environment. Read commands do not require a conversation id.
 
 Except for built-in help, every successful command writes one JSON object with `schemaVersion` to stdout. The current schema version is `2`. Errors write one JSON object to stderr. Exit codes are `0` for success, `2` for invalid input, `3` when the service is unavailable, `4` for API or response errors, and `5` for conflicts.
 
@@ -74,7 +76,7 @@ taskctl issue create \
   [--status STATUS] \
   [--priority PRIORITY] \
   [--labels a,b] \
-  [--assignee MEMBER] \
+  [--assignee MEMBER|agent:KIND] \
   [--thread-id ID] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \
@@ -87,7 +89,7 @@ taskctl issue create \
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, and `canceled`. Priorities are `none`, `urgent`, `high`, `medium`, and `low`.
 
-Issues created through `taskctl` are assigned to Codex Agent by default. Pass `--assignee` with an active member's exact username, display name, or id to assign it to that member. `current-user` and `codex-agent` are also accepted. Other CLI writes preserve the existing assignee.
+Issues created through `taskctl` are assigned to the calling Agent by default. Pass `--assignee` with an active member's exact username, display name, or id to assign it to that member. `current-user`, `agent:<kind>`, and the legacy `codex-agent` target are also accepted. Other CLI writes preserve the existing assignee.
 
 ## Update issues
 
@@ -101,7 +103,7 @@ taskctl issue update ID \
   [--status STATUS] \
   [--priority PRIORITY] \
   [--labels a,b] \
-  [--assignee MEMBER] \
+  [--assignee MEMBER|agent:KIND] \
   [--thread-id ID] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \

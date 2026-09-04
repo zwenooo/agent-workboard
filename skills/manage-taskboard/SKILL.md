@@ -12,6 +12,7 @@ Open only the relevant section of [references/cli.md](references/cli.md) when co
 ## Select the CLI and active service
 
 - Use the exact `taskctl` binary and Taskboard URL supplied by the task or injected runtime. Do not replace them with a global CLI, the default port, or another board.
+- Attribute every command to the current runtime with the global `--agent` option. Use `codex`, `claude-code`, `openclaw`, `hermes`, `pi`, or a stable lowercase slug for another Agent. Omit it only when `TASKBOARD_AGENT_KIND` is already injected. Never identify one Agent as another.
 - If that exact command reaches a sandbox restriction on the loopback service, retry the same command with the required permission. Do not switch binaries or endpoints.
 
 ## Terminology: local companion

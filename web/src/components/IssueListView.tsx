@@ -80,7 +80,7 @@ export function IssueListView({
                 <div className="issue-list-rows">
                   {statusTasks.length ? statusTasks.map((task) => {
                     const assigneeTarget = assigneeTargetForActor(task.assignee, currentUser) ?? "current-user";
-                    const assigneeOptions = [currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
+                    const assigneeOptions = [task.assignee, currentUser, ...assigneeMembers, CODEX_AGENT_ACTOR]
                       .filter((actor, index, actors) => actors.findIndex((candidate) => `${candidate.type}:${candidate.id}` === `${actor.type}:${actor.id}`) === index);
                     const displayIdentifier = task.externalKey ?? task.identifier;
                     return (

@@ -9,10 +9,13 @@ import { promisify } from "node:util";
 
 import { normalizeCloudUrl } from "../server/cloud-config.mjs";
 import {
+  DEFAULT_AGENT_KIND,
   DEFAULT_PROJECT_ID,
+  GENERIC_AGENT_KIND,
   TASK_STATUSES,
   isTaskPriority,
   isTaskStatus,
+  normalizeAgentKind,
 } from "../shared/domain.mjs";
 
 export const SCHEMA_VERSION = 2;
@@ -27,7 +30,7 @@ const sourceRuntimeFile = path.resolve(
   "launcher-runtime.json",
 );
 const BOOLEAN_OPTIONS = new Set(["json", "clear-binding-thread", "help"]);
-const GLOBAL_OPTIONS = new Set(["runtime-file"]);
+const GLOBAL_OPTIONS = new Set(["runtime-file", "agent"]);
 
 const COMMAND_OPTIONS = new Map([
   ["project list", new Set(["json"])],
@@ -144,6 +147,7 @@ Commands:
 
 Global options:
   --runtime-file FILE  Use an explicit launcher runtime descriptor
+  --agent KIND         Attribute requests to codex, claude-code, openclaw, hermes, pi, or another Agent slug
   --json               Make the JSON output contract explicit
   --help               Show help for a supported command level
 
@@ -159,7 +163,7 @@ Actions:
   get ISSUE_ID [--json]
   create --project PROJECT_ID --title TITLE
     [--description TEXT | --description-file FILE]
-    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER]
+    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER|agent:KIND]
     [--thread-id ID]
     [--git-branch BRANCH | --worktree-path PATH [--worktree-branch BRANCH]]
     [--start-date YYYY-MM-DD] [--due-date YYYY-MM-DD]
@@ -167,7 +171,7 @@ Actions:
   update ISSUE_ID
     [--project PROJECT_ID] [--title TITLE]
     [--description TEXT | --description-file FILE]
-    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER]
+    [--status STATUS] [--priority PRIORITY] [--labels a,b] [--assignee MEMBER|agent:KIND]
     [--thread-id ID]
     [--git-branch BRANCH | --worktree-path PATH [--worktree-branch BRANCH]]
     [--start-date YYYY-MM-DD] [--due-date YYYY-MM-DD]
@@ -325,7 +329,11 @@ async function execute(parsed, overrides) {
   const target = usesCompanionControl || env.CODEX_TASKBOARD_COMPANION_URL !== undefined
       ? await resolveCompanionUrl(env, overrides)
       : await resolveTaskboardBaseUrl(env, overrides);
-  const api = createApiClient(overrides, target);
+  const agentKind = resolveTaskctlAgentKind(
+    parsed.options.agent ?? env.TASKBOARD_AGENT_KIND,
+    env,
+  );
+  const api = createApiClient(overrides, { ...target, agentKind });
   switch (command) {
     case "project list":
       expectOperandCount(parsed, 0);
@@ -478,9 +486,19 @@ async function execute(parsed, overrides) {
   }
 }
 
+function resolveTaskctlAgentKind(value, env) {
+  const fallback = env.CODEX_THREAD_ID ? DEFAULT_AGENT_KIND : GENERIC_AGENT_KIND;
+  try {
+    return normalizeAgentKind(value, fallback);
+  } catch (error) {
+    throw usageError(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function createApiClient(overrides, {
   url: explicitBaseUrl,
   windowsTransport = false,
+  agentKind = DEFAULT_AGENT_KIND,
 } = {}) {
   const fetchImplementation = overrides.fetch
     ?? (windowsTransport
@@ -493,8 +511,11 @@ function createApiClient(overrides, {
     });
   }
 
-  const env = overrides.env ?? process.env;
   const baseUrl = normalizeBaseUrl(explicitBaseUrl ?? DEFAULT_API_URL);
+  const taskctlHeaders = {
+    "x-taskboard-client": "taskctl",
+    "x-taskboard-agent-kind": agentKind,
+  };
 
   return {
     async request(method, pathname, body) {
@@ -504,7 +525,7 @@ function createApiClient(overrides, {
           method,
           headers: {
             accept: "application/json",
-            "x-taskboard-client": "taskctl",
+            ...taskctlHeaders,
             ...(body === undefined ? {} : { "content-type": "application/json" }),
           },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -540,7 +561,7 @@ function createApiClient(overrides, {
         response = await fetchImplementation(resolveApiUrl(baseUrl, pathname), {
           headers: {
             accept: "*/*",
-            "x-taskboard-client": "taskctl",
+            ...taskctlHeaders,
           },
         });
       } catch (error) {
@@ -576,7 +597,7 @@ function createApiClient(overrides, {
           headers: {
             accept: "application/json",
             "content-type": contentType,
-            "x-taskboard-client": "taskctl",
+            ...taskctlHeaders,
             "x-taskboard-filename": encodeURIComponent(filename),
             "x-taskboard-attachment-kind": kind,
           },
@@ -927,6 +948,15 @@ async function resolveAssigneeTarget(api, rawAssignee) {
   const value = rawAssignee.trim();
   if (!value) throw usageError("--assignee cannot be empty");
   if (value === "current-user" || value === "codex-agent") return value;
+  if (value.startsWith("agent:")) {
+    try {
+      const kind = value.slice("agent:".length);
+      if (!kind) throw new TypeError("Agent kind cannot be empty");
+      return `agent:${normalizeAgentKind(kind)}`;
+    } catch (error) {
+      throw usageError(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   const response = await api.request("GET", "/api/members");
   const members = Array.isArray(response.members)
