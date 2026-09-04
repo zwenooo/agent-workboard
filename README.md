@@ -46,7 +46,9 @@ npm run taskctl -- issue create \
   --labels product,mvp
 ```
 
-Use `npm link` if you want `taskctl` on your shell path. Set `CODEX_TASKBOARD_URL` to point the CLI at another local or LAN service. Pass `--agent codex|claude-code|openclaw|hermes|pi` (or set `TASKBOARD_AGENT_KIND`) so work is attributed to the calling Agent. Cloud deployments are configured through the **loopback companion** (device-local loopback service for auth and path mapping—not a chat persona) with `taskctl cloud login`.
+Use `npm link` if you want `taskctl` on your shell path. Set `CODEX_TASKBOARD_URL` to point the CLI at another local or LAN service. Pass `--agent codex|claude-code|openclaw|hermes|pi` (or set `TASKBOARD_AGENT_KIND`) so work is attributed to the calling Agent. Cloud deployments are configured through the **loopback companion** (device-local loopback service for auth and path mapping—not a chat persona) with `taskctl cloud login`. In the local companion UI, select a cloud project and click **Link folder** beside **Local Agent connected** to choose its checkout without copying an ID or running a mapping command.
+
+When no explicit Taskboard URL or active launcher is configured, the bundled `taskctl` starts the loopback companion silently on first use. Running `npm start` beforehand is optional and is only needed when you want its logs in a foreground terminal.
 
 ## Install the Codex Skill
 

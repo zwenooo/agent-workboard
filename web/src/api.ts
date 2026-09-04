@@ -551,6 +551,14 @@ export async function renameProject(projectId: string, name: string): Promise<Pr
   return data.project;
 }
 
+export async function selectProjectWorkspace(projectId: string): Promise<string | null> {
+  const data = await request<{ projectId: string; workspacePath: string | null }>(
+    `/api/local/project-mappings/${encodeURIComponent(projectId)}/select`,
+    { method: "POST" },
+  );
+  return data.workspacePath;
+}
+
 export async function createProjectLabel(projectId: string, label: string): Promise<Project> {
   const data = await request<{ project: Project }>(
     `/api/projects/${encodeURIComponent(projectId)}/labels`,

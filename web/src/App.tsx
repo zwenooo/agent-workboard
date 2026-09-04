@@ -43,6 +43,7 @@ import {
   resolveTaskboardUrl,
   resolveTaskboardWebSocketUrl,
   restoreTask as restoreTaskRequest,
+  selectProjectWorkspace,
   setApiText,
   setCurrentUserActor,
   syncJiraConnection,
@@ -833,6 +834,7 @@ export function App() {
   const [pendingProjectDelete, setPendingProjectDelete] = useState<ProjectChoice | null>(null);
   const [projectDeleteIssueCount, setProjectDeleteIssueCount] = useState<number | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [mappingProjectId, setMappingProjectId] = useState<string | null>(null);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
   const [projectCodexIdentities, setProjectCodexIdentities] = useState(readProjectCodexIdentities);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
@@ -3252,6 +3254,29 @@ export function App() {
     }
   }
 
+  async function mapProjectWorkspace(project: ProjectChoice) {
+    if (mappingProjectId) return;
+    setMappingProjectId(project.id);
+    setActionError(null);
+    try {
+      const workspacePath = await selectProjectWorkspace(project.id);
+      if (!workspacePath) return;
+      rememberDeviceWorkspacePath(project.id, workspacePath);
+      setProjects((current) => current.map((candidate) => (
+        candidate.id === project.id ? { ...candidate, workspacePath } : candidate
+      )));
+      setProjectMenuOpen(false);
+      setAnnouncement(text(
+        `已关联“${project.name}”的本机目录`,
+        `Local folder linked for “${project.name}”`,
+      ));
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setMappingProjectId(null);
+    }
+  }
+
   function openJiraDialog() {
     setProjectMenuOpen(false);
     setProjectContextMenu(null);
@@ -3487,6 +3512,18 @@ export function App() {
                 mode={taskboardMetadata.mode}
                 available={taskboardMetadata.mode !== "cloud" || taskboardMetadata.localCapabilities?.available === true}
                 href={localCompanionHref()}
+                workspace={taskboardMetadata.mode === "cloud"
+                  && taskboardMetadata.localCapabilities?.available === true
+                  && selectedProjectChoice?.persisted
+                  && selectedProjectChoice.id !== GLOBAL_PROJECT_ID
+                  && selectedProjectChoice.id !== JIRA_PROJECT_ID
+                  ? {
+                      linked: Boolean(selectedDeviceWorkspacePath),
+                      pending: mappingProjectId === selectedProjectChoice.id,
+                      projectName: selectedProjectChoice.name,
+                      onSelect: () => void mapProjectWorkspace(selectedProjectChoice),
+                    }
+                  : undefined}
                 text={text}
               />
             )}

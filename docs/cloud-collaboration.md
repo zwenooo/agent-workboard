@@ -104,13 +104,7 @@ npm ci
 npm run build:web
 ```
 
-Start the local companion:
-
-```bash
-CODEX_TASKBOARD_HOST=127.0.0.1 npm start
-```
-
-In a second terminal, configure cloud mode. Use the deployed HTTPS Worker origin, pass the member's exact account username to `--actor-name`, and enter that member's password only at the private `Account password:` prompt:
+Configure cloud mode. The first bundled `taskctl` command silently starts the loopback companion when it is not already running, so there is no separate startup command. Use the deployed HTTPS Worker origin, pass the member's exact account username to `--actor-name`, and enter that member's password only at the private `Account password:` prompt:
 
 ```bash
 npm run taskctl -- cloud login \
@@ -123,14 +117,11 @@ npm run taskctl -- project list
 
 The account password is validated against the Worker before the companion saves the configuration. It is not part of the command and is not echoed by the prompt.
 
-For every cloud project used with Codex, map its project ID to that friend's own absolute checkout path:
+Run `CODEX_TASKBOARD_HOST=127.0.0.1 npm start` only when foreground companion logs are needed.
 
-```bash
-npm run taskctl -- project map PROJECT_ID \
-  --workspace-path /absolute/path/on/their/device
-```
+For every cloud project used with an Agent, open the local companion, select that project, then use **Link folder** beside **Local Agent connected** and choose the checkout through the system folder selector. The owner follows the same steps on the owner's device. Mappings are intentionally different on each device and are never synchronized to D1.
 
-The owner runs the same mapping command with the owner's own path. Mappings are intentionally different on each device and are never synchronized to D1.
+`taskctl project map` remains available for headless machines and scripted setup, but members do not need it for normal desktop use.
 
 Launch the injected Codex window:
 

@@ -335,6 +335,65 @@ function isLoopbackAddress(value) {
     || address.startsWith("::ffff:127.");
 }
 
+const WINDOWS_FOLDER_PICKER_SCRIPT = `
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
+$owner = [System.Windows.Forms.Form]::new()
+try {
+  $owner.ShowInTaskbar = $false
+  $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $owner.Size = [System.Drawing.Size]::new(1, 1)
+  $owner.Opacity = 0
+  $owner.TopMost = $true
+  $owner.Show()
+  $owner.Activate()
+  $dialog.Description = "选择项目的本机目录"
+  $initialPath = [Environment]::GetEnvironmentVariable("TASKBOARD_FOLDER_PICKER_INITIAL_PATH")
+  if ($initialPath -and [System.IO.Directory]::Exists($initialPath)) {
+    $dialog.SelectedPath = $initialPath
+  }
+  if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::Out.Write($dialog.SelectedPath)
+  }
+} finally {
+  $dialog.Dispose()
+  $owner.Close()
+  $owner.Dispose()
+}
+`.trim();
+
+async function selectWorkspaceDirectory(initialPath) {
+  if (process.platform !== "win32") {
+    throw new ApiError(501, "FOLDER_PICKER_UNAVAILABLE", "Folder selection is currently available on Windows only");
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-STA", "-Command", WINDOWS_FOLDER_PICKER_SCRIPT],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TASKBOARD_FOLDER_PICKER_INITIAL_PATH: initialPath ?? "",
+        },
+        maxBuffer: 64 * 1024,
+        windowsHide: false,
+      },
+    );
+    const workspacePath = stdout.trim();
+    return workspacePath || null;
+  } catch (error) {
+    throw new ApiError(
+      500,
+      "FOLDER_PICKER_FAILED",
+      "Could not open the system folder selector",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 function assertAiLoopbackRequest(request) {
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(403, "LOCAL_AI_LOOPBACK_REQUIRED", "Local AI routes are only available from this device");
@@ -2473,6 +2532,26 @@ export function createTaskboardServer(options = {}) {
         const connection = await jira.sync({ force: true });
         events.emit("project.labels.updated", { project: database.getProject(JIRA_PROJECT_ID) });
         return sendJson(response, 200, { connection });
+      }
+
+      const projectMappingSelectRoute = pathname.match(/^\/api\/local\/project-mappings\/([^/]+)\/select$/);
+      if (projectMappingSelectRoute) {
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Project mapping selection does not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(projectMappingSelectRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_PATH", "Project id contains invalid encoding");
+        }
+        validateProjectId(projectId);
+        await assertEmptyRequestBody(request, "POST /api/local/project-mappings/:projectId/select");
+        const currentConfig = await cloudConfig.read();
+        const workspacePath = await selectWorkspaceDirectory(currentConfig.projectMappings[projectId]);
+        if (workspacePath) await cloudConfig.setProjectWorkspace(projectId, workspacePath);
+        return sendJson(response, 200, { projectId, workspacePath });
       }
 
       const projectMappingRoute = pathname.match(/^\/api\/local\/project-mappings\/([^/]+)$/);

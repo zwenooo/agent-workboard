@@ -23,12 +23,9 @@ export const DEFAULT_API_URL = "http://127.0.0.1:47823";
 
 const execFileAsync = promisify(execFile);
 
-const sourceRuntimeFile = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  ".data",
-  "launcher-runtime.json",
-);
+const sourceProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const sourceRuntimeFile = path.join(sourceProjectRoot, ".data", "launcher-runtime.json");
+const sourceServerPath = path.join(sourceProjectRoot, "server", "index.mjs");
 const BOOLEAN_OPTIONS = new Set(["json", "clear-binding-thread", "help"]);
 const GLOBAL_OPTIONS = new Set(["runtime-file", "agent"]);
 
@@ -333,6 +330,9 @@ async function execute(parsed, overrides) {
     parsed.options.agent ?? env.TASKBOARD_AGENT_KIND,
     env,
   );
+  if (target.autoStart && overrides.fetch === undefined) {
+    await ensureLocalCompanion(target.url, env, overrides);
+  }
   const api = createApiClient(overrides, { ...target, agentKind });
   switch (command) {
     case "project list":
@@ -1290,7 +1290,7 @@ function resolveApiUrl(baseUrl, pathname) {
 
 async function resolveTaskboardBaseUrl(env, overrides) {
   if (env.CODEX_TASKBOARD_URL !== undefined) {
-    return { url: env.CODEX_TASKBOARD_URL, windowsTransport: false };
+    return { url: env.CODEX_TASKBOARD_URL, windowsTransport: false, autoStart: false };
   }
   const configuredDescriptorPath = env.CODEX_TASKBOARD_RUNTIME_FILE;
   const isWsl = isWslEnvironment(env);
@@ -1340,7 +1340,7 @@ async function resolveTaskboardBaseUrl(env, overrides) {
           exitCode: 4,
         });
       }
-      return { url: descriptor.url, windowsTransport };
+      return { url: descriptor.url, windowsTransport, autoStart: false };
     } catch (error) {
       if (!required && error?.code === "ENOENT") continue;
       if (error instanceof TaskctlError) throw error;
@@ -1352,7 +1352,7 @@ async function resolveTaskboardBaseUrl(env, overrides) {
     }
   }
 
-  return { url: DEFAULT_API_URL, windowsTransport: false };
+  return { url: DEFAULT_API_URL, windowsTransport: false, autoStart: true };
 }
 
 function isWslEnvironment(env) {
@@ -1455,7 +1455,7 @@ async function fetchThroughWindows(url, init, overrides) {
 
 async function resolveCompanionUrl(env, overrides) {
   const target = env.CODEX_TASKBOARD_COMPANION_URL !== undefined
-    ? { url: env.CODEX_TASKBOARD_COMPANION_URL, windowsTransport: false }
+    ? { url: env.CODEX_TASKBOARD_COMPANION_URL, windowsTransport: false, autoStart: false }
     : await resolveTaskboardBaseUrl(env, overrides);
   let url;
   try {
@@ -1483,7 +1483,53 @@ async function resolveCompanionUrl(env, overrides) {
   return {
     url: url.toString().replace(/\/$/, ""),
     windowsTransport: target.windowsTransport,
+    autoStart: target.autoStart,
   };
+}
+
+async function localCompanionReachable(url) {
+  try {
+    const response = await fetch(resolveApiUrl(normalizeBaseUrl(url), "/health"), {
+      signal: AbortSignal.timeout(750),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureLocalCompanion(rawUrl, env, overrides) {
+  if (await localCompanionReachable(rawUrl)) return;
+
+  const url = new URL(normalizeBaseUrl(rawUrl));
+  const child = (overrides.spawn ?? spawn)(process.execPath, [sourceServerPath], {
+    cwd: sourceProjectRoot,
+    detached: true,
+    env: {
+      ...env,
+      CODEX_TASKBOARD_HOST: "127.0.0.1",
+      CODEX_TASKBOARD_PORT: url.port,
+    },
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  let startError = null;
+  child.once("error", (error) => {
+    startError = error;
+  });
+  child.unref?.();
+
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (await localCompanionReachable(rawUrl)) return;
+    if (startError) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new TaskctlError(`Cannot start local companion at ${normalizeBaseUrl(rawUrl)}`, {
+    code: "SERVICE_UNAVAILABLE",
+    exitCode: 3,
+    details: startError instanceof Error ? startError.message : undefined,
+  });
 }
 
 async function readResponse(response) {

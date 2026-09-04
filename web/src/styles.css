@@ -889,9 +889,19 @@ kbd {
 .companion-status-action {
   flex: 0 0 auto;
   margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
   font-weight: 600;
   text-decoration: none;
+}
+
+.companion-status-action:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .companion-status-action:hover,
