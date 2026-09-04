@@ -26,6 +26,7 @@ const execFileAsync = promisify(execFile);
 const sourceProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRuntimeFile = path.join(sourceProjectRoot, ".data", "launcher-runtime.json");
 const sourceServerPath = path.join(sourceProjectRoot, "server", "index.mjs");
+const MIN_COMPANION_NODE_VERSION = [22, 5, 0];
 const BOOLEAN_OPTIONS = new Set(["json", "clear-binding-thread", "help"]);
 const GLOBAL_OPTIONS = new Set(["runtime-file", "agent"]);
 
@@ -1498,11 +1499,67 @@ async function localCompanionReachable(url) {
   }
 }
 
+function isSupportedNodeVersion(version) {
+  const parts = String(version).replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.some((part) => !Number.isFinite(part))) return false;
+  for (let index = 0; index < MIN_COMPANION_NODE_VERSION.length; index += 1) {
+    if (parts[index] > MIN_COMPANION_NODE_VERSION[index]) return true;
+    if (parts[index] < MIN_COMPANION_NODE_VERSION[index]) return false;
+  }
+  return true;
+}
+
+async function resolveCompanionNodeExecutable(env) {
+  if (isSupportedNodeVersion(process.versions.node)) return process.execPath;
+
+  const candidates = [];
+  const configuredPath = env.TASKBOARD_NODE_PATH?.trim();
+  if (configuredPath) candidates.push(configuredPath);
+  try {
+    const command = process.platform === "win32" ? "where.exe" : "which";
+    const { stdout } = await execFileAsync(command, ["node"], {
+      encoding: "utf8",
+      env,
+      maxBuffer: 64 * 1024,
+    });
+    candidates.push(...stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean));
+  } catch {
+    // The configured runtime may still be usable through TASKBOARD_NODE_PATH.
+  }
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const normalizedCandidate = path.resolve(candidate);
+    if (seen.has(normalizedCandidate) || normalizedCandidate === path.resolve(process.execPath)) continue;
+    seen.add(normalizedCandidate);
+    try {
+      const { stdout } = await execFileAsync(normalizedCandidate, ["--version"], {
+        encoding: "utf8",
+        env,
+        maxBuffer: 8 * 1024,
+      });
+      if (isSupportedNodeVersion(stdout.trim())) return normalizedCandidate;
+    } catch {
+      // Continue until a compatible Node runtime is found.
+    }
+  }
+
+  throw new TaskctlError(
+    `Node.js ${MIN_COMPANION_NODE_VERSION.join(".")} or newer is required to start the local companion`,
+    {
+      code: "NODE_RUNTIME_UNSUPPORTED",
+      exitCode: 3,
+      details: `Current runtime is Node.js ${process.versions.node}`,
+    },
+  );
+}
+
 async function ensureLocalCompanion(rawUrl, env, overrides) {
   if (await localCompanionReachable(rawUrl)) return;
 
   const url = new URL(normalizeBaseUrl(rawUrl));
-  const child = (overrides.spawn ?? spawn)(process.execPath, [sourceServerPath], {
+  const nodeExecutable = await resolveCompanionNodeExecutable(env);
+  const child = (overrides.spawn ?? spawn)(nodeExecutable, [sourceServerPath], {
     cwd: sourceProjectRoot,
     detached: true,
     env: {
