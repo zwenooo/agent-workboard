@@ -1231,6 +1231,16 @@ kbd {
   animation: context-menu-in 90ms ease-out both;
 }
 
+@media (max-width: 520px) {
+  .header-project-menu {
+    position: fixed;
+    top: 42px;
+    left: 8px;
+    width: min(240px, calc(100vw - 16px));
+    max-height: calc(100vh - 50px);
+  }
+}
+
 .header-project-menu > span {
   display: block;
   padding: 5px 7px 6px;
@@ -1286,6 +1296,66 @@ kbd {
 
 .project-menu-actions {
   flex: 0 0 auto;
+}
+
+.project-menu-rename {
+  display: grid;
+  gap: 6px;
+  padding: 4px 3px 3px;
+}
+
+.project-menu-rename label {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 550;
+}
+
+.project-menu-rename input {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.project-menu-rename input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.project-menu-rename .project-dialog-error {
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.project-menu-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.header-project-menu .project-menu-rename-actions button:not(.search-clear) {
+  display: inline-flex;
+  width: auto;
+  min-height: 26px;
+  padding: 0 9px;
+  border: var(--border-hairline) solid var(--border);
+}
+
+.header-project-menu .project-menu-rename-actions button.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.header-project-menu .project-menu-rename-actions button.is-primary:hover:not(:disabled),
+.header-project-menu .project-menu-rename-actions button.is-primary:focus-visible {
+  background: color-mix(in srgb, var(--accent) 88%, black);
 }
 
 .project-menu-empty {
@@ -8906,6 +8976,10 @@ kbd {
   .compact-select,
   .header-actions .toolbar-connection {
     display: none;
+  }
+
+  .header-project-menu .project-avatar {
+    display: block;
   }
 
   .project-name {

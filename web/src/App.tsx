@@ -39,6 +39,7 @@ import {
   moveTask as moveTaskRequest,
   publishHostRuntime,
   removeTaskRelation,
+  renameProject as renameProjectRequest,
   resolveTaskboardUrl,
   resolveTaskboardWebSocketUrl,
   restoreTask as restoreTaskRequest,
@@ -76,6 +77,7 @@ import {
 import { LinearIcon } from "./components/LinearIcon";
 import {
   DeleteIcon,
+  EditIcon,
   MoreIcon,
   PlusIcon,
   RefreshIcon,
@@ -309,6 +311,7 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 };
 
 const GLOBAL_PROJECT_ID = "local";
+const JIRA_PROJECT_ID = "jira-my-tasks";
 const ALL_PROJECTS_ID = "__all_projects__";
 const ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
   ...DEFAULT_BOARD_DISPLAY_SETTINGS,
@@ -377,6 +380,7 @@ const EVENT_NAMES = [
   "attachment.created",
   "attachment.deleted",
   "project.created",
+  "project.updated",
   "project.labels.updated",
   "project.readme.updated",
   "client-storage.updated",
@@ -643,7 +647,7 @@ function LocalRealtimeSync({
           || !eventProjectId
           || eventProjectId === selectedProjectId
         );
-      if (event.type === "project.created") {
+      if (event.type === "project.created" || event.type === "project.updated") {
         scheduleRefresh({ projects: true });
         return;
       }
@@ -815,6 +819,9 @@ export function App() {
   );
   const [projectMenuSearch, setProjectMenuSearch] = useState("");
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
+  const [pendingProjectRename, setPendingProjectRename] = useState<ProjectChoice | null>(null);
+  const [projectRenameName, setProjectRenameName] = useState("");
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [jiraDialogOpen, setJiraDialogOpen] = useState(false);
@@ -1155,10 +1162,15 @@ export function App() {
   const availableLabels = isAllProjects
     ? [...new Set(projects.flatMap((project) => project.labels))]
     : selectedProject?.labels ?? [];
+  const projectDisplayName = useCallback((project: Pick<Project, "id" | "name">) => (
+    project.id === GLOBAL_PROJECT_ID && (project.name === "全局" || project.name === "Local")
+      ? text("临时任务", "Temporary tasks")
+      : project.name
+  ), [text]);
   const projectNames = useMemo(() => Object.fromEntries(projects.map((project) => [
     project.id,
-    project.id === GLOBAL_PROJECT_ID ? text("临时任务", "Temporary tasks") : project.name,
-  ])), [projects, text]);
+    projectDisplayName(project),
+  ])), [projectDisplayName, projects]);
   const projectChoices = useMemo<ProjectChoice[]>(() => {
     const persistedById = new Map(projects.map((project) => [project.id, project]));
     const seen = new Set<string>();
@@ -1166,14 +1178,13 @@ export function App() {
     for (const project of hostContext?.projects ?? []) {
       if (!project.id || !project.name || seen.has(project.id)) continue;
       seen.add(project.id);
+      const persistedProject = persistedById.get(project.id);
       choices.push({
         id: project.id,
-        name: project.id === GLOBAL_PROJECT_ID
-          ? text("临时任务", "Temporary tasks")
-          : persistedById.get(project.id)?.name ?? project.name,
-        issueCount: persistedById.get(project.id)?.issueCount ?? 0,
+        name: projectDisplayName(persistedProject ?? project),
+        issueCount: persistedProject?.issueCount ?? 0,
         inCodex: true,
-        persisted: persistedById.has(project.id),
+        persisted: Boolean(persistedProject),
         codexIdentity: project.workspacePath && project.projectKind && project.hostId
           ? {
               codexProjectId: project.id,
@@ -1188,9 +1199,7 @@ export function App() {
       if (seen.has(project.id)) continue;
       choices.push({
         id: project.id,
-        name: project.id === GLOBAL_PROJECT_ID
-          ? text("临时任务", "Temporary tasks")
-          : project.name,
+        name: projectDisplayName(project),
         issueCount: project.issueCount,
         inCodex: false,
         persisted: true,
@@ -1206,10 +1215,11 @@ export function App() {
       ...sortedChoices.filter((project) => project.issueCount > 0),
       ...sortedChoices.filter((project) => project.issueCount === 0),
     ];
-  }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
+  }, [hostContext?.projects, projectCodexIdentities, projectDisplayName, projects, recentProjectIds]);
   const projectMenuCandidates = projectChoices.filter(
     (project) => project.id !== GLOBAL_PROJECT_ID || project.issueCount > 0,
   );
+  const selectedProjectChoice = projectChoices.find((project) => project.id === selectedProjectId) ?? null;
   const projectMenuNeedle = projectMenuSearch.trim().toLocaleLowerCase();
   const projectMenuChoices = projectMenuNeedle
     ? projectMenuCandidates.filter((project) => project.name.toLocaleLowerCase().includes(projectMenuNeedle))
@@ -1716,6 +1726,12 @@ export function App() {
       window.removeEventListener("keydown", closeProjectMenuWithEscape);
     };
   }, [projectMenuOpen]);
+
+  useEffect(() => {
+    if (projectMenuOpen || renamingProjectId) return;
+    setPendingProjectRename(null);
+    setProjectRenameName("");
+  }, [projectMenuOpen, renamingProjectId]);
 
   useEffect(() => {
     if (!projectContextMenu) return;
@@ -3295,6 +3311,48 @@ export function App() {
     }
   }
 
+  function beginProjectRename(project: ProjectChoice) {
+    setProjectContextMenu(null);
+    setProjectMenuSearch("");
+    setPendingProjectRename(project);
+    setProjectRenameName(project.name);
+    setActionError(null);
+    setProjectMenuOpen(true);
+  }
+
+  function closeProjectRename() {
+    if (renamingProjectId) return;
+    setPendingProjectRename(null);
+    setProjectRenameName("");
+    setActionError(null);
+  }
+
+  async function renamePendingProject() {
+    if (!pendingProjectRename || renamingProjectId) return;
+    const name = projectRenameName.trim();
+    if (!name) return;
+    const project = pendingProjectRename;
+    setRenamingProjectId(project.id);
+    setActionError(null);
+    try {
+      const updatedProject = await renameProjectRequest(project.id, name);
+      setProjects((current) => current.map((candidate) => (
+        candidate.id === updatedProject.id ? updatedProject : candidate
+      )));
+      setPendingProjectRename(null);
+      setProjectRenameName("");
+      setProjectMenuOpen(false);
+      setAnnouncement(text(
+        `项目已重命名为“${updatedProject.name}”`,
+        `Project renamed to “${updatedProject.name}”`,
+      ));
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setRenamingProjectId(null);
+    }
+  }
+
   function requestProjectDelete(project: ProjectChoice) {
     setProjectMenuOpen(false);
     setProjectContextMenu(null);
@@ -3349,9 +3407,9 @@ export function App() {
 
   const headerProjectName = isAllProjects
     ? text("所有项目", "All projects")
-    : selectedProject?.id === GLOBAL_PROJECT_ID
-      ? text("临时任务", "Temporary tasks")
-      : selectedProject?.name ?? text("任务面板", "Taskboard");
+    : selectedProject
+      ? projectDisplayName(selectedProject)
+      : text("任务面板", "Taskboard");
   const appShellStyle = embedded
     ? { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px` } as CSSProperties
     : undefined;
@@ -3515,7 +3573,7 @@ export function App() {
                             role="menuitemradio"
                             aria-checked={project.id === selectedProjectId}
                             disabled={openingProjectId !== null}
-                            onContextMenu={project.id.startsWith("temp-") ? (event) => {
+                            onContextMenu={project.persisted && project.id !== JIRA_PROJECT_ID ? (event) => {
                               event.preventDefault();
                               setProjectContextMenu({
                                 project,
@@ -3540,30 +3598,90 @@ export function App() {
                     </div>
                     <div className="project-menu-actions">
                       <div className="project-menu-divider" role="separator" />
-                      {taskboardMetadata?.localCapabilities?.available !== false && (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          disabled={openingProjectId !== null}
-                          onClick={openJiraDialog}
+                      {pendingProjectRename ? (
+                        <form
+                          className="project-menu-rename"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void renamePendingProject();
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.stopPropagation();
+                              closeProjectRename();
+                            }
+                          }}
                         >
-                          <RelationIcon className="project-avatar" color="currentColor" size={16} />
-                          <span>
-                            {jiraConnection?.configured
-                              ? text("Jira 设置", "Jira settings")
-                              : text("连接 Jira", "Connect Jira")}
-                          </span>
-                        </button>
+                          <label htmlFor="project-rename-input">
+                            {text("重命名项目", "Rename project")}
+                          </label>
+                          <input
+                            id="project-rename-input"
+                            autoFocus
+                            maxLength={120}
+                            required
+                            value={projectRenameName}
+                            onChange={(event) => setProjectRenameName(event.target.value)}
+                          />
+                          {actionErrorText && <span className="project-dialog-error">{actionErrorText}</span>}
+                          <div className="project-menu-rename-actions">
+                            <button
+                              type="button"
+                              disabled={renamingProjectId !== null}
+                              onClick={closeProjectRename}
+                            >
+                              {text("取消", "Cancel")}
+                            </button>
+                            <button
+                              className="is-primary"
+                              type="submit"
+                              disabled={!projectRenameName.trim() || renamingProjectId !== null}
+                            >
+                              {renamingProjectId
+                                ? text("保存中…", "Saving…")
+                                : text("保存", "Save")}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          {selectedProjectChoice?.persisted && selectedProjectChoice.id !== JIRA_PROJECT_ID && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={openingProjectId !== null}
+                              onClick={() => beginProjectRename(selectedProjectChoice)}
+                            >
+                              <EditIcon className="project-avatar" color="currentColor" size={16} />
+                              <span>{text("重命名项目", "Rename project")}</span>
+                            </button>
+                          )}
+                          {taskboardMetadata?.localCapabilities?.available !== false && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={openingProjectId !== null}
+                              onClick={openJiraDialog}
+                            >
+                              <RelationIcon className="project-avatar" color="currentColor" size={16} />
+                              <span>
+                                {jiraConnection?.configured
+                                  ? text("Jira 设置", "Jira settings")
+                                  : text("连接 Jira", "Connect Jira")}
+                              </span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={openingProjectId !== null}
+                            onClick={openCreateProjectDialog}
+                          >
+                            <PlusIcon className="project-avatar" color="currentColor" size={16} />
+                            <span>{text("创建项目", "Create project")}</span>
+                          </button>
+                        </>
                       )}
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={openingProjectId !== null}
-                        onClick={openCreateProjectDialog}
-                      >
-                        <PlusIcon className="project-avatar" color="currentColor" size={16} />
-                        <span>{text("创建项目", "Create project")}</span>
-                      </button>
                     </div>
                   </div>
                 )}
@@ -4012,14 +4130,28 @@ export function App() {
           style={{ left: projectContextMenu.x, top: projectContextMenu.y }}
         >
           <button
-            className="context-menu-item is-danger"
+            className="context-menu-item"
             type="button"
             role="menuitem"
-            onClick={() => requestProjectDelete(projectContextMenu.project)}
+            onClick={() => beginProjectRename(projectContextMenu.project)}
           >
-            <span className="context-menu-icon" aria-hidden="true"><DeleteIcon color="currentColor" /></span>
-            <span className="context-menu-label">{text("删除项目", "Delete project")}</span>
+            <span className="context-menu-icon" aria-hidden="true"><EditIcon color="currentColor" /></span>
+            <span className="context-menu-label">{text("重命名项目", "Rename project")}</span>
           </button>
+          {projectContextMenu.project.id.startsWith("temp-") && (
+            <>
+              <div className="context-menu-divider" role="separator" />
+              <button
+                className="context-menu-item is-danger"
+                type="button"
+                role="menuitem"
+                onClick={() => requestProjectDelete(projectContextMenu.project)}
+              >
+                <span className="context-menu-icon" aria-hidden="true"><DeleteIcon color="currentColor" /></span>
+                <span className="context-menu-label">{text("删除项目", "Delete project")}</span>
+              </button>
+            </>
+          )}
         </div>
       )}
 

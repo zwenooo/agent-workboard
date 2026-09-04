@@ -1002,8 +1002,8 @@ export class TaskboardDatabase {
     `).run(timestamp, timestamp);
     this.database.prepare(`
       UPDATE projects
-      SET name = '全局', workspace_path = NULL, updated_at = ?
-      WHERE id = 'local' AND (name != '全局' OR workspace_path IS NOT NULL)
+      SET workspace_path = NULL, updated_at = ?
+      WHERE id = 'local' AND workspace_path IS NOT NULL
     `).run(timestamp);
   }
 
@@ -1135,6 +1135,16 @@ export class TaskboardDatabase {
       throw error;
     }
     return this.getProject(input.id);
+  }
+
+  renameProject(id, name) {
+    const result = this.database.prepare(`
+      UPDATE projects SET name = ?, updated_at = ? WHERE id = ?
+    `).run(name, now(), id);
+    if (result.changes !== 1) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+    }
+    return this.getProject(id);
   }
 
   ensureJiraProject(name) {

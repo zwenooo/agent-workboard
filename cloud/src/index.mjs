@@ -1485,6 +1485,14 @@ function parseProjectCreate(body) {
   return { id, name };
 }
 
+function parseProjectUpdate(body) {
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["name"]));
+  return {
+    name: stringField(body.name, "name", { required: true, maxLength: 120 }),
+  };
+}
+
 function parseClientStorageUpdate(body) {
   assertPlainObject(body);
   assertAllowedKeys(body, new Set(["key", "value"]));
@@ -1806,6 +1814,16 @@ async function createProject(env, input) {
     throw error;
   }
   return getProject(env, input.id);
+}
+
+async function renameProject(env, id, name) {
+  const result = await env.DB.prepare(`
+    UPDATE projects SET name = ?, updated_at = ? WHERE id = ?
+  `).bind(name, now(), id).run();
+  if (!changed(result)) {
+    throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+  }
+  return getProject(env, id);
 }
 
 async function addProjectLabel(env, projectId, label) {
@@ -3651,7 +3669,16 @@ async function routeApi(request, env, actor, url) {
   if (projectMatch) {
     requireNoQuery(url, "Project routes");
     const projectId = validateProjectId(decodePathPart(projectMatch[1], "Project id"));
-    if (request.method !== "DELETE") methodNotAllowed(["DELETE"]);
+    if (request.method === "PATCH") {
+      return json(200, {
+        project: await renameProject(
+          env,
+          projectId,
+          parseProjectUpdate(await readJson(request)).name,
+        ),
+      });
+    }
+    if (request.method !== "DELETE") methodNotAllowed(["PATCH", "DELETE"]);
     await deleteProject(env, projectId);
     return empty(204);
   }
