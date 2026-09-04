@@ -23,6 +23,7 @@ import {
   deleteArchivedTask as deleteArchivedTaskRequest,
   deleteProjectLabel as deleteProjectLabelRequest,
   deleteProject as deleteProjectRequest,
+  EMPTY_JIRA_CONNECTION,
   getAiChatCatalog,
   getCodexThreadProgress,
   getHostRuntime,
@@ -1885,7 +1886,9 @@ export function App() {
       ]);
       if (requestId !== projectsRequestRef.current) return;
       const [nextJiraConnection, nextTemporaryTasks] = await Promise.all([
-        getJiraConnection(signal),
+        metadata.localCapabilities?.available === false
+          ? Promise.resolve(EMPTY_JIRA_CONNECTION)
+          : getJiraConnection(signal),
         listTasks(GLOBAL_PROJECT_ID, signal),
       ]);
       if (requestId !== projectsRequestRef.current) return;
@@ -2047,6 +2050,11 @@ export function App() {
   }, [isJiraProject, jiraConnection?.configured, refreshTasks, taskScopeProjectId]);
 
   useEffect(() => {
+    if (taskboardMetadata === null || taskboardMetadata.localCapabilities?.available === false) {
+      setDevelopmentScan({ workspacePath: null, contexts: [] });
+      setDevelopmentScanLoading(false);
+      return;
+    }
     const standalone = !embedded || window.parent === window;
     const developmentProjectId = isAllProjects
       ? developmentEditorProjectId ?? (standalone ? contextMenuTask?.projectId : null)
@@ -2100,6 +2108,7 @@ export function App() {
     embedded,
     hostContext?.projectId,
     hostContext?.threadId,
+    taskboardMetadata,
     isAllProjects,
     rememberDeviceWorkspacePath,
     selectedProjectId,
@@ -3078,7 +3087,7 @@ export function App() {
           context.type === "worktree" && context.path === expectedWorktreePath
         ));
         if (!worktreeExists) workspacePath = developmentScan.workspacePath ?? baseWorkspacePath;
-      } else {
+      } else if (taskboardMetadata?.localCapabilities?.available !== false) {
         try {
           const scan = await listDevelopmentContexts(
             task.projectId,
@@ -3531,19 +3540,21 @@ export function App() {
                     </div>
                     <div className="project-menu-actions">
                       <div className="project-menu-divider" role="separator" />
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={openingProjectId !== null}
-                        onClick={openJiraDialog}
-                      >
-                        <RelationIcon className="project-avatar" color="currentColor" size={16} />
-                        <span>
-                          {jiraConnection?.configured
-                            ? text("Jira 设置", "Jira settings")
-                            : text("连接 Jira", "Connect Jira")}
-                        </span>
-                      </button>
+                      {taskboardMetadata?.localCapabilities?.available !== false && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={openingProjectId !== null}
+                          onClick={openJiraDialog}
+                        >
+                          <RelationIcon className="project-avatar" color="currentColor" size={16} />
+                          <span>
+                            {jiraConnection?.configured
+                              ? text("Jira 设置", "Jira settings")
+                              : text("连接 Jira", "Connect Jira")}
+                          </span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         role="menuitem"

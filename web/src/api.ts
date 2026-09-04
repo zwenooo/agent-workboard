@@ -181,6 +181,17 @@ export async function getJiraConnection(signal?: AbortSignal): Promise<JiraConne
   }
 }
 
+export const EMPTY_JIRA_CONNECTION: JiraConnection = {
+  configured: false,
+  baseUrl: null,
+  username: null,
+  displayName: null,
+  projects: [],
+  projectId: "jira-my-tasks",
+  lastSyncedAt: null,
+  insecureHttp: false,
+};
+
 export async function configureJiraConnection(input: {
   baseUrl: string;
   username: string;
