@@ -63,6 +63,7 @@ import {
   type BoardDisplaySettings,
 } from "./components/BoardCardDisplayMenu";
 import { CloudAccountControl } from "./components/CloudAccountControl";
+import { CompanionStatus } from "./components/CompanionStatus";
 import { DashboardView } from "./components/DashboardView";
 import { ProjectReadmeView } from "./components/ProjectReadmeView";
 import { IssueListView } from "./components/IssueListView";
@@ -3009,6 +3010,20 @@ export function App() {
     }
   }
 
+  function localCompanionHref(
+    projectId: string | null = selectedProjectId === ALL_PROJECTS_ID ? null : selectedProjectId,
+    issueIdentifier: string | null = detailTaskIdentifier,
+  ) {
+    const url = buildIssueUrl(
+      "http://127.0.0.1:47823/",
+      projectId,
+      issueIdentifier,
+    );
+    const languageQuery = new URL(window.location.href).searchParams.get("lang");
+    if (languageQuery) url.searchParams.set("lang", languageQuery);
+    return url.toString();
+  }
+
   function expandCodexSidebar() {
     if (!embedded || window.parent === window) return;
     postEmbeddedHostMessage({ type: "taskboard:expand-sidebar" });
@@ -3043,6 +3058,23 @@ export function App() {
   }
 
   async function openTaskInThread(task: Task) {
+    if (
+      taskboardMetadata?.mode === "cloud"
+      && taskboardMetadata.localCapabilities?.available === false
+    ) {
+      const companionWindow = window.open(
+        localCompanionHref(task.projectId, task.identifier),
+        "_blank",
+        "noopener,noreferrer",
+      );
+      if (!companionWindow) {
+        setActionError(text(
+          "浏览器阻止了本机 companion，请允许弹出窗口后重试。",
+          "The browser blocked the local companion. Allow pop-ups and try again.",
+        ));
+      }
+      return;
+    }
     const standalone = !embedded || window.parent === window;
     const projectless = task.projectId === GLOBAL_PROJECT_ID;
     const taskboardProject = projects.find((project) => project.id === task.projectId);
@@ -3450,6 +3482,14 @@ export function App() {
 
           <div className="nav-spacer" />
           <div className="nav-footer">
+            {taskboardMetadata && (
+              <CompanionStatus
+                mode={taskboardMetadata.mode}
+                available={taskboardMetadata.mode !== "cloud" || taskboardMetadata.localCapabilities?.available === true}
+                href={localCompanionHref()}
+                text={text}
+              />
+            )}
             <CloudAccountControl />
             <div className={`connection connection-${connection}`}>
               <span aria-hidden="true" />

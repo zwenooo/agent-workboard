@@ -857,6 +857,50 @@ kbd {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.companion-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 5px 8px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.companion-status-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.companion-status.is-available .companion-status-dot {
+  background: var(--success);
+}
+
+.companion-status-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.companion-status-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.companion-status-action:hover,
+.companion-status-action:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .theme-toggle {
   margin-top: 2px;
 }
