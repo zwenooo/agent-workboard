@@ -13,6 +13,10 @@ function isProjectBoardDisplaySettingsKey(key: string) {
 
 async function readServerStorage() {
   const response = await fetch(new URL("api/client-storage", document.baseURI));
+  // Cloud mode requires an authenticated member for shared storage. The app
+  // initializes this module before AuthGateway can render the sign-in page,
+  // so an unauthenticated 401 must not prevent React from mounting.
+  if (response.status === 401) return;
   if (!response.ok) throw new Error(`Taskboard storage returned ${response.status}`);
   const payload = await response.json() as { entries: Record<string, string> };
   if (localStorageBackend) {
