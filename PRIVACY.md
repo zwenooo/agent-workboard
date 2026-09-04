@@ -1,39 +1,30 @@
 # Privacy
 
-Codex Taskboard is a local-first application. Its desktop launcher runs the
-Taskboard service on the local computer and does not send Taskboard content or
-usage telemetry to the project maintainers.
+Codex Taskboard is a Web application. It does not include advertising or a
+project-maintainer analytics service.
 
-## Data stored on the computer
+## Local data
 
-On Windows, Codex Taskboard stores its database, attachments, launcher runtime
-file, and independent Codex browser profile under:
+When run locally, the Node.js service stores its SQLite database and
+attachments in `.data/` by default. The location can be changed with
+`CODEX_TASKBOARD_DATA_DIR`.
 
-`%APPDATA%\Codex Taskboard`
+## Cloud data
 
-Launcher logs are stored under:
-
-`%LOCALAPPDATA%\Codex Taskboard\Logs`
-
-The launcher also installs the bundled `manage-taskboard` Skill in the current
-user's `.agents\skills\manage-taskboard` directory.
+Cloud collaboration is optional. A Cloudflare deployment stores Taskboard data
+in the D1 database and R2 bucket selected by the deployment owner. Browser
+sessions and `taskctl` credentials are sent only to that configured deployment.
 
 ## Network activity
 
-- The desktop app uses a loopback-only HTTP service to connect the embedded
-  panel, the launcher, and `taskctl` on the same computer.
-- The updater checks this project's GitHub Releases endpoint for available
-  versions.
+- The browser connects to the local service or Cloudflare Worker selected by
+  the user.
+- Optional Codex integration communicates with the user's local Codex runtime.
 - The official Codex application and Codex CLI use OpenAI services under the
   user's existing OpenAI account and OpenAI's terms.
-- Cloud collaboration is optional. When a user configures it, Taskboard data is
-  sent to the deployment selected by that user.
-
-Codex Taskboard does not include advertising or a project-maintainer analytics
-service.
 
 ## Removing data
 
-Uninstalling the Windows application removes the installed program but keeps
-user data and the installed Skill. See
-[Windows uninstall](docs/windows-uninstall.md) for the optional manual cleanup.
+Delete the configured local data directory to remove local Taskboard data.
+Cloud deployment owners can remove the configured D1 database and R2 bucket
+through Cloudflare.
