@@ -39,6 +39,14 @@ await Promise.all([
     entryPoints: [path.join(projectRoot, "server", "index.mjs")],
     outfile: path.join(scriptsDirectory, "server.mjs"),
   }),
+  build({
+    ...bundleOptions,
+    banner: {
+      js: 'import { createRequire as __taskboardCreateRequire } from "node:module"; const require = __taskboardCreateRequire(import.meta.url);',
+    },
+    entryPoints: [path.join(projectRoot, "scripts", "taskboard-mcp.mjs")],
+    outfile: path.join(scriptsDirectory, "taskboard-mcp.mjs"),
+  }),
 ]);
 
 await Promise.all([
@@ -49,6 +57,10 @@ await Promise.all([
   copyFile(
     path.join(projectRoot, "server", "codex-slash-commands-0.139.0.json"),
     path.join(scriptsDirectory, "codex-slash-commands-0.139.0.json"),
+  ),
+  copyFile(
+    path.join(projectRoot, "scripts", "manage-taskboard-bootstrap.mjs"),
+    path.join(scriptsDirectory, "bootstrap.mjs"),
   ),
   cp(builtWebDirectory, packagedWebDirectory, { recursive: true }),
 ]);

@@ -1,18 +1,20 @@
 ---
 name: manage-taskboard
-description: Manage Codex Taskboard / e-taskboard work with taskctl. Use for taskboard issue IDs, status sync, comments, or taskctl cloud setup—not for unrelated product docs.
+description: Manage Codex Taskboard / e-taskboard work through the bundled stdio MCP, with taskctl retained for CI and compatibility. Use for taskboard issue IDs, status sync, comments, or cloud setup—not for unrelated product docs.
 ---
 
 # Manage Taskboard
 
-Use the packaged `scripts/taskctl.mjs` for every project, issue, relation, and comment operation. Resolve it relative to this `SKILL.md` and invoke it with Node.js; do not require a global `taskctl`, repository checkout, package installation, or separate service startup. In the instructions below, `taskctl` means that exact packaged script. Consume its JSON output. Use the exact issue identifier returned by the taskboard or supplied in the prompt. Never assume, derive, or rewrite an identifier prefix.
+Use the bundled `scripts/taskboard-mcp.mjs` for normal Agent project, issue, relation, comment, attachment, and cloud-status operations. It is an MCP stdio server: the Agent owns its stdin/stdout process, while the first tool call silently starts or reuses the local bridge and holds a lease until the Agent exits. Use the packaged `scripts/taskctl.mjs` only for CI, diagnostics, explicit CLI workflows, or Agents without MCP support. Resolve both scripts relative to this `SKILL.md`; do not require a global `taskctl`, repository checkout, package installation, or separate service startup. Consume structured JSON results. Use the exact issue identifier returned by the taskboard or supplied in the prompt. Never assume, derive, or rewrite an identifier prefix.
 
 Open only the relevant section of [references/cli.md](references/cli.md) when command syntax is needed.
 
-## Select the CLI and active service
+## Select the MCP and compatibility CLI
 
-- Use the packaged `scripts/taskctl.mjs` and the exact Taskboard URL supplied by the task or injected runtime. Do not replace them with a global CLI, a guessed port, or another board.
-- Do not ask the user to install `taskctl`, install dependencies, or start the default local companion. When no explicit URL or active launcher is supplied, the first packaged `taskctl` call starts its bundled local service silently and waits until it is ready.
+- Use the bundled `scripts/taskboard-mcp.mjs` through the Agent's MCP configuration and the exact Taskboard URL supplied by the task or injected runtime. Do not replace it with a global CLI, a guessed port, or another board.
+- On first installation, run `node scripts/bootstrap.mjs --agent codex|claude-code|pi` once if the Agent does not already load the MCP entry. The bootstrap is idempotent, preserves other MCP entries, and writes the absolute path of the bundled MCP server. If the Agent does not hot-reload MCP configuration, restart that Agent once.
+- Do not ask the user to install `taskctl`, install dependencies, or start the local bridge. The MCP server starts it silently on the first Taskboard tool call, without a terminal window, and releases its lease when the Agent process exits.
+- `taskctl` remains the compatibility entry point for CI, diagnostics, explicit CLI workflows, and Agents without MCP support. It may use the legacy explicit service lifecycle; normal Skill operation must use MCP.
 - When a desktop user needs to map a cloud project, direct them to select the project in the local companion and click **Link folder** beside **Local Agent connected**. Do not ask them to copy a project ID or run `taskctl project map` unless they explicitly prefer the CLI or are on a headless machine.
 - Attribute every command to the current runtime with the global `--agent` option. Use `codex`, `claude-code`, `openclaw`, `hermes`, `pi`, or a stable lowercase slug for another Agent. Omit it only when `TASKBOARD_AGENT_KIND` is already injected. Never identify one Agent as another.
 - If that exact command reaches a sandbox restriction on the loopback service, retry the same command with the required permission. Do not switch binaries or endpoints.

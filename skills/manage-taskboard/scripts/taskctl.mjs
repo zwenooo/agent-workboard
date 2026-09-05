@@ -1533,7 +1533,7 @@ function writeJson(stream, payload) {
 `);
 }
 var entrypoint = process.argv[1] ? realpathSync(process.argv[1]) : "";
-if (entrypoint === realpathSync(fileURLToPath(import.meta.url))) {
+if (process.env.TASKBOARD_MCP_EMBEDDED !== "1" && entrypoint === realpathSync(fileURLToPath(import.meta.url))) {
   process.exitCode = await main();
 }
 export {

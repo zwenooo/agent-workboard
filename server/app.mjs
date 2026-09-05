@@ -1814,6 +1814,8 @@ export function resolveServerOptions(options = {}) {
       ?? path.join(codexHome, "process_manager", "chat_processes.json"),
     instanceToken,
     instanceSecret,
+    leaseManaged: options.leaseManaged === true
+      || String(environment.CODEX_TASKBOARD_LEASE_MANAGED ?? "") === "1",
     trustedOrigins: parseTrustedOrigins(environment[TRUSTED_ORIGINS_ENV]),
     version: String(
       options.version ?? environment.CODEX_TASKBOARD_VERSION ?? "development",
@@ -3555,6 +3557,29 @@ export function createTaskboardServer(options = {}) {
 
   const cloudRealtimeServer = new WebSocketServer({ noServer: true });
   const cloudRealtimeSockets = new Set();
+  const localLeaseServer = new WebSocketServer({ noServer: true });
+  const localLeaseSockets = new Set();
+  let leaseShutdownTimer = null;
+  let managedShutdownRequested = false;
+
+  function cancelLeaseShutdown() {
+    if (leaseShutdownTimer !== null) {
+      clearTimeout(leaseShutdownTimer);
+      leaseShutdownTimer = null;
+    }
+  }
+
+  function scheduleLeaseShutdown() {
+    if (!resolved.leaseManaged || localLeaseSockets.size > 0 || leaseShutdownTimer !== null) return;
+    leaseShutdownTimer = setTimeout(() => {
+      leaseShutdownTimer = null;
+      if (localLeaseSockets.size === 0 && !managedShutdownRequested) {
+        managedShutdownRequested = true;
+        process.kill(process.pid, "SIGTERM");
+      }
+    }, 5_000);
+    leaseShutdownTimer.unref?.();
+  }
 
   function rejectWebSocketUpgrade(socket, status, message) {
     const body = `${message}\n`;
@@ -3597,6 +3622,26 @@ export function createTaskboardServer(options = {}) {
         resolved.trustedOrigins,
       );
       const url = new URL(request.url, "http://127.0.0.1");
+      if (url.pathname === "/api/local/lease") {
+        if (!resolved.leaseManaged) {
+          rejectWebSocketUpgrade(socket, 404, "Not Found");
+          return;
+        }
+        assertLoopbackRequest(request);
+        localLeaseServer.handleUpgrade(request, socket, head, (localSocket) => {
+          localLeaseSockets.add(localSocket);
+          cancelLeaseShutdown();
+          localSocket.on("close", () => {
+            localLeaseSockets.delete(localSocket);
+            scheduleLeaseShutdown();
+          });
+          localSocket.on("error", () => {
+            localLeaseSockets.delete(localSocket);
+            scheduleLeaseShutdown();
+          });
+        });
+        return;
+      }
       if (url.pathname !== "/api/events" || [...url.searchParams.keys()].length > 0) {
         rejectWebSocketUpgrade(socket, 404, "Not Found");
         return;
@@ -3696,6 +3741,7 @@ export function createTaskboardServer(options = {}) {
         else server.listen({ fd });
       });
       listening = true;
+      scheduleLeaseShutdown();
       return server.address();
     },
     async close() {
@@ -3705,6 +3751,10 @@ export function createTaskboardServer(options = {}) {
       }
       cloudRealtimeSockets.clear();
       cloudRealtimeServer.close();
+      cancelLeaseShutdown();
+      for (const localSocket of localLeaseSockets) localSocket.terminate();
+      localLeaseSockets.clear();
+      localLeaseServer.close();
       const serverClosed = listening
         ? new Promise((resolve, reject) => {
             server.close((error) => error ? reject(error) : resolve());

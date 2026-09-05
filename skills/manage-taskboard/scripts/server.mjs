@@ -12898,6 +12898,7 @@ function resolveServerOptions(options = {}) {
     codexProcessesPath: options.codexProcessesPath ?? path9.join(codexHome, "process_manager", "chat_processes.json"),
     instanceToken,
     instanceSecret,
+    leaseManaged: options.leaseManaged === true || String(environment.CODEX_TASKBOARD_LEASE_MANAGED ?? "") === "1",
     trustedOrigins: parseTrustedOrigins(environment[TRUSTED_ORIGINS_ENV]),
     version: String(
       options.version ?? environment.CODEX_TASKBOARD_VERSION ?? "development"
@@ -14492,6 +14493,27 @@ data: ${JSON.stringify(event)}
   });
   const cloudRealtimeServer = new import_websocket_server.default({ noServer: true });
   const cloudRealtimeSockets = /* @__PURE__ */ new Set();
+  const localLeaseServer = new import_websocket_server.default({ noServer: true });
+  const localLeaseSockets = /* @__PURE__ */ new Set();
+  let leaseShutdownTimer = null;
+  let managedShutdownRequested = false;
+  function cancelLeaseShutdown() {
+    if (leaseShutdownTimer !== null) {
+      clearTimeout(leaseShutdownTimer);
+      leaseShutdownTimer = null;
+    }
+  }
+  function scheduleLeaseShutdown() {
+    if (!resolved.leaseManaged || localLeaseSockets.size > 0 || leaseShutdownTimer !== null) return;
+    leaseShutdownTimer = setTimeout(() => {
+      leaseShutdownTimer = null;
+      if (localLeaseSockets.size === 0 && !managedShutdownRequested) {
+        managedShutdownRequested = true;
+        process.kill(process.pid, "SIGTERM");
+      }
+    }, 5e3);
+    leaseShutdownTimer.unref?.();
+  }
   function rejectWebSocketUpgrade(socket, status, message) {
     const body = `${message}
 `;
@@ -14532,6 +14554,26 @@ data: ${JSON.stringify(event)}
         resolved.trustedOrigins
       );
       const url = new URL(request.url, "http://127.0.0.1");
+      if (url.pathname === "/api/local/lease") {
+        if (!resolved.leaseManaged) {
+          rejectWebSocketUpgrade(socket, 404, "Not Found");
+          return;
+        }
+        assertLoopbackRequest(request);
+        localLeaseServer.handleUpgrade(request, socket, head, (localSocket) => {
+          localLeaseSockets.add(localSocket);
+          cancelLeaseShutdown();
+          localSocket.on("close", () => {
+            localLeaseSockets.delete(localSocket);
+            scheduleLeaseShutdown();
+          });
+          localSocket.on("error", () => {
+            localLeaseSockets.delete(localSocket);
+            scheduleLeaseShutdown();
+          });
+        });
+        return;
+      }
       if (url.pathname !== "/api/events" || [...url.searchParams.keys()].length > 0) {
         rejectWebSocketUpgrade(socket, 404, "Not Found");
         return;
@@ -14627,6 +14669,7 @@ data: ${JSON.stringify(event)}
         else server.listen({ fd });
       });
       listening = true;
+      scheduleLeaseShutdown();
       return server.address();
     },
     async close() {
@@ -14636,6 +14679,10 @@ data: ${JSON.stringify(event)}
       }
       cloudRealtimeSockets.clear();
       cloudRealtimeServer.close();
+      cancelLeaseShutdown();
+      for (const localSocket of localLeaseSockets) localSocket.terminate();
+      localLeaseSockets.clear();
+      localLeaseServer.close();
       const serverClosed = listening ? new Promise((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       }) : Promise.resolve();
