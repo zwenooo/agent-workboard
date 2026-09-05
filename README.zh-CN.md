@@ -59,6 +59,8 @@ ln -s /absolute/path/to/codex-taskboard/skills/manage-taskboard \
   ~/.agents/skills/manage-taskboard
 ```
 
+复制后的 Skill 可以独立运行：其中打包的 `scripts/taskctl.mjs` 会在首次使用时静默启动内置本地服务。用户不需要 Taskboard 仓库、`npm install`、`npm link`、全局 `taskctl`，也不需要另外启动 companion。本机凭据和项目目录映射保存在当前用户的应用数据目录中，不写入 Skill 文件夹。
+
 该 Skill 会指导 Codex 检查议题，将其移到 `in_progress`，使用乐观版本控制，验证工作，然后将其移到 `in_review`；只有在用户明确确认接受或要求将议题标记为完成后，才会将议题移到 `done`。
 
 ## 嵌入 Codex

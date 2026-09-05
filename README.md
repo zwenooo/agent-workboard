@@ -59,6 +59,8 @@ ln -s /absolute/path/to/codex-taskboard/skills/manage-taskboard \
   ~/.agents/skills/manage-taskboard
 ```
 
+The copied Skill is self-contained: its packaged `scripts/taskctl.mjs` silently starts the bundled local service on first use. Users do not need the Taskboard repository, `npm install`, `npm link`, a global `taskctl`, or a separately started companion. Local credentials and project mappings are stored in the current user's application data directory, outside the Skill folder.
+
 The Skill teaches Codex to inspect an issue, move it to `in_progress`, use optimistic versions, verify the work, and then move it to `in_review`; it moves the issue to `done` only after the user explicitly confirms acceptance or asks to mark it complete.
 
 ## Embed in Codex

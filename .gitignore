@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!skills/manage-taskboard/dist/
+!skills/manage-taskboard/dist/**
 .data/
 .wrangler/
 .dev.vars*

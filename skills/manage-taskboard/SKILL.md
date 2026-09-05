@@ -5,14 +5,14 @@ description: Manage Codex Taskboard / e-taskboard work with taskctl. Use for tas
 
 # Manage Taskboard
 
-Use `taskctl` for every project, issue, relation, and comment operation. Consume its JSON output. Use the exact issue identifier returned by the taskboard or supplied in the prompt. Never assume, derive, or rewrite an identifier prefix.
+Use the packaged `scripts/taskctl.mjs` for every project, issue, relation, and comment operation. Resolve it relative to this `SKILL.md` and invoke it with Node.js; do not require a global `taskctl`, repository checkout, package installation, or separate service startup. In the instructions below, `taskctl` means that exact packaged script. Consume its JSON output. Use the exact issue identifier returned by the taskboard or supplied in the prompt. Never assume, derive, or rewrite an identifier prefix.
 
 Open only the relevant section of [references/cli.md](references/cli.md) when command syntax is needed.
 
 ## Select the CLI and active service
 
-- Use the exact `taskctl` binary and Taskboard URL supplied by the task or injected runtime. Do not replace them with a global CLI, the default port, or another board.
-- Do not ask the user to start the default local companion before using the bundled CLI. When no explicit URL or active launcher is supplied, the first `taskctl` call starts it silently and waits until it is ready.
+- Use the packaged `scripts/taskctl.mjs` and the exact Taskboard URL supplied by the task or injected runtime. Do not replace them with a global CLI, a guessed port, or another board.
+- Do not ask the user to install `taskctl`, install dependencies, or start the default local companion. When no explicit URL or active launcher is supplied, the first packaged `taskctl` call starts its bundled local service silently and waits until it is ready.
 - When a desktop user needs to map a cloud project, direct them to select the project in the local companion and click **Link folder** beside **Local Agent connected**. Do not ask them to copy a project ID or run `taskctl project map` unless they explicitly prefer the CLI or are on a headless machine.
 - Attribute every command to the current runtime with the global `--agent` option. Use `codex`, `claude-code`, `openclaw`, `hermes`, `pi`, or a stable lowercase slug for another Agent. Omit it only when `TASKBOARD_AGENT_KIND` is already injected. Never identify one Agent as another.
 - If that exact command reaches a sandbox restriction on the loopback service, retry the same command with the required permission. Do not switch binaries or endpoints.
