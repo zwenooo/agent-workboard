@@ -99,6 +99,7 @@ export class CodexAppServer {
       const child = spawn(command.executable, command.args, {
         env: this.processEnv,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
       this.child = child;
       this.stdoutBuffer = "";

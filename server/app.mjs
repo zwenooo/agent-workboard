@@ -379,7 +379,7 @@ async function selectWorkspaceDirectory(initialPath) {
           TASKBOARD_FOLDER_PICKER_INITIAL_PATH: initialPath ?? "",
         },
         maxBuffer: 64 * 1024,
-        windowsHide: false,
+        windowsHide: true,
       },
     );
     const workspacePath = stdout.trim();
@@ -1747,6 +1747,7 @@ async function scanDevelopmentContexts(workspacePath, processEnv = process.env) 
       env: environment,
       timeout: 4_000,
       maxBuffer: 1024 * 1024,
+      windowsHide: true,
     });
     const root = rootResult.stdout.trim();
     const [branchesResult, worktreesResult] = await Promise.all([
@@ -1754,11 +1755,13 @@ async function scanDevelopmentContexts(workspacePath, processEnv = process.env) 
         env: environment,
         timeout: 4_000,
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       }),
       execFileAsync("git", ["-C", root, "worktree", "list", "--porcelain"], {
         env: environment,
         timeout: 4_000,
         maxBuffer: 1024 * 1024,
+        windowsHide: true,
       }),
     ]);
     const branches = branchesResult.stdout.split("\n").map((branch) => branch.trim()).filter(Boolean);
