@@ -556,6 +556,115 @@ function isLocalTaskboardOrigin(origin: string): boolean {
   }
 }
 
+interface LocalCompanionPanelProps {
+  project: ProjectChoice | null;
+  task: Task | null;
+  workspacePath: string | null;
+  taskStatusLabel: string | null;
+  available: boolean;
+  mappingPending: boolean;
+  onSelectProject: () => void;
+  onMapWorkspace: (() => void) | undefined;
+  onOpenTask: (task: Task) => void;
+  text: (chinese: string, english: string) => string;
+}
+
+function LocalCompanionPanel({
+  project,
+  task,
+  workspacePath,
+  taskStatusLabel: currentTaskStatusLabel,
+  available,
+  mappingPending,
+  onSelectProject,
+  onMapWorkspace,
+  onOpenTask,
+  text,
+}: LocalCompanionPanelProps) {
+  const hasProject = Boolean(project && project.id !== ALL_PROJECTS_ID);
+  const canMapWorkspace = Boolean(
+    project?.persisted
+      && project.id !== GLOBAL_PROJECT_ID
+      && project.id !== JIRA_PROJECT_ID
+      && onMapWorkspace,
+  );
+
+  return (
+    <section className="local-companion-panel" aria-labelledby="local-companion-title">
+      <div className="local-companion-intro">
+        <div className="local-companion-eyebrow">
+          <span className={`local-companion-status-dot${available ? " is-available" : ""}`} aria-hidden="true" />
+          <span>{available
+            ? text("本机 Agent 已连接", "Local Agent connected")
+            : text("本机 Agent 未连接", "Local Agent unavailable")}</span>
+        </div>
+        <h1 id="local-companion-title">{text("本机工作区", "Local workspace")}</h1>
+      </div>
+
+      <div className="local-companion-section">
+        <div className="local-companion-section-heading">
+          <span>{text("项目目录", "Project folder")}</span>
+          <button type="button" onClick={onSelectProject}>
+            {text("切换项目", "Switch project")}
+          </button>
+        </div>
+        {hasProject && project ? (
+          <div className="local-companion-project">
+            <span className="local-companion-project-icon" aria-hidden="true"><TaskboardIcon name="projectFolder" /></span>
+            <div className="local-companion-project-copy">
+              <strong>{project.name}</strong>
+              <span title={workspacePath ?? undefined}>{workspacePath ?? text("尚未关联本机目录", "No local folder linked")}</span>
+            </div>
+            {canMapWorkspace && (
+              <button
+                className="local-companion-link"
+                type="button"
+                disabled={mappingPending}
+                onClick={onMapWorkspace}
+              >
+                {mappingPending
+                  ? text("选择中…", "Selecting…")
+                  : workspacePath
+                    ? text("更换目录", "Change folder")
+                    : text("关联目录", "Link folder")}
+              </button>
+            )}
+          </div>
+        ) : (
+          <button className="local-companion-project local-companion-project-empty" type="button" onClick={onSelectProject}>
+            <span className="local-companion-project-icon" aria-hidden="true"><TaskboardIcon name="projectFolder" /></span>
+            <span>{text("选择一个项目", "Choose a project")}</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        )}
+      </div>
+
+      <div className="local-companion-section local-companion-task-section">
+        <div className="local-companion-section-heading">
+          <span>{text("当前任务", "Current task")}</span>
+        </div>
+        {task ? (
+          <article className="local-companion-task">
+            <div className="local-companion-task-meta">
+              <span>{task.identifier}</span>
+              {currentTaskStatusLabel && <span>{currentTaskStatusLabel}</span>}
+            </div>
+            <h2>{task.title}</h2>
+            <button className="button primary" type="button" onClick={() => onOpenTask(task)}>
+              {text("在 Codex 中打开", "Open in Codex")}
+            </button>
+          </article>
+        ) : (
+          <div className="local-companion-empty">
+            <span aria-hidden="true"><LinearIcon name="folder" /></span>
+            <p>{text("从线上任务板打开任务", "Open a task from the online board")}</p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort(
     (left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt),
@@ -732,6 +841,9 @@ export function App() {
   const [developmentScanLoading, setDevelopmentScanLoading] = useState(false);
   const [manageTaskboardSkillPath, setManageTaskboardSkillPath] = useState("");
   const [taskboardMetadata, setTaskboardMetadata] = useState<TaskboardMetadata | null>(null);
+  const localCompanion = !embedded
+    && taskboardMetadata?.mode === "cloud"
+    && isLocalTaskboardOrigin(new URL(document.baseURI).origin);
   const [localAiChatAvailable, setLocalAiChatAvailable] = useState(false);
   const [aiImportReadyProjectId, setAiImportReadyProjectId] = useState<string | null>(null);
   const [aiThreads, setAiThreads] = useState<AiChatThread[]>([]);
@@ -924,7 +1036,7 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedCodexProjectIdentity = useMemo(
     () => selectedProject ? codexProjectContextForTaskProject(selectedProject.id) : null,
-    [deviceWorkspacePaths, hostContext, projectCodexIdentities, projects, selectedProject?.id],
+    [deviceWorkspacePaths, hostContext, localCompanion, projectCodexIdentities, projects, selectedProject?.id],
   );
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
@@ -1022,6 +1134,9 @@ export function App() {
   const selectedDeviceWorkspacePath = selectedProjectId === GLOBAL_PROJECT_ID || isAllProjects
     ? undefined
     : deviceWorkspacePaths[selectedProjectId];
+  const localCompanionWorkspacePath = localCompanion
+    ? selectedProject?.workspacePath ?? null
+    : selectedDeviceWorkspacePath ?? developmentScan.workspacePath ?? null;
   const selectedProjectAutomation = projectAutomations[selectedProjectId];
   const automationProjectContext = useMemo<Partial<CodexProjectIdentity> & {
     unavailableReason: string | null;
@@ -2094,7 +2209,9 @@ export function App() {
       ? developmentEditorProjectId
         ? deviceWorkspacePaths[developmentEditorProjectId]
         : contextMenuWorkspacePath
-      : selectedDeviceWorkspacePath;
+      : localCompanion
+        ? selectedProject?.workspacePath ?? selectedDeviceWorkspacePath
+        : selectedDeviceWorkspacePath;
     setDevelopmentScan({ workspacePath: workspacePath ?? null, contexts: [] });
     setDevelopmentScanLoading(true);
     void listDevelopmentContexts(
@@ -2127,10 +2244,12 @@ export function App() {
     embedded,
     hostContext?.projectId,
     hostContext?.threadId,
+    localCompanion,
     taskboardMetadata,
     isAllProjects,
     rememberDeviceWorkspacePath,
     selectedProjectId,
+    selectedProject?.workspacePath,
     selectedDeviceWorkspacePath,
   ]);
 
@@ -2936,8 +3055,11 @@ export function App() {
     const directCodexProject = hostContext?.projects?.find(
       (project) => project.id === taskboardProjectId,
     );
-    const mappedWorkspacePath = deviceWorkspacePaths[taskboardProjectId]
-      ?? taskboardProject?.workspacePath
+    const mappedWorkspacePath = localCompanion
+      ? taskboardProject?.workspacePath
+        ?? deviceWorkspacePaths[taskboardProjectId]
+      : deviceWorkspacePaths[taskboardProjectId]
+        ?? taskboardProject?.workspacePath
       ?? directCodexProject?.workspacePath;
     const codexProject = directCodexProject ?? hostContext?.projects?.find(
       (project) => project.workspacePath === mappedWorkspacePath,
@@ -3080,6 +3202,9 @@ export function App() {
     const standalone = !embedded || window.parent === window;
     const projectless = task.projectId === GLOBAL_PROJECT_ID;
     const taskboardProject = projects.find((project) => project.id === task.projectId);
+    const mappedWorkspacePath = localCompanion
+      ? taskboardProject?.workspacePath ?? deviceWorkspacePaths[task.projectId]
+      : deviceWorkspacePaths[task.projectId] ?? taskboardProject?.workspacePath;
     const savedRemoteIdentity = projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
       ? projectCodexIdentities[task.projectId]
       : null;
@@ -3116,8 +3241,7 @@ export function App() {
       : task.developmentContext?.type === "worktree"
         ? task.developmentContext.path
         : codexProjectContext?.workspacePath
-          ?? deviceWorkspacePaths[task.projectId]
-          ?? taskboardProject?.workspacePath;
+          ?? mappedWorkspacePath;
     const embeddedInstruction = text(
       `[$manage-taskboard](${manageTaskboardSkillPath}) 议题 ID：${task.identifier}`,
       `[$manage-taskboard](${manageTaskboardSkillPath}) Issue ID: ${task.identifier}`,
@@ -3130,8 +3254,7 @@ export function App() {
     ) {
       const expectedWorktreePath = task.developmentContext.path;
       const baseWorkspacePath = codexProjectContext?.workspacePath
-        ?? deviceWorkspacePaths[task.projectId]
-        ?? taskboardProject?.workspacePath;
+        ?? mappedWorkspacePath;
       if (standalone) {
         const worktreeExists = developmentScan.contexts.some((context) => (
           context.type === "worktree" && context.path === expectedWorktreePath
@@ -3473,7 +3596,7 @@ export function App() {
 
   return (
     <TaskboardLanguageProvider language={language}>
-      <div className={`app-shell${embedded ? " embedded" : ""}`} style={appShellStyle}>
+      <div className={`app-shell${embedded ? " embedded" : ""}${localCompanion ? " local-companion" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
           selectedProjectId={taskScopeProjectId}
@@ -3491,23 +3614,23 @@ export function App() {
         <aside className="app-nav" aria-label={text("任务面板导航", "Taskboard navigation")}>
           <div className="brand-row">
             <span className="brand-mark" aria-hidden="true"><LinearIcon name="folder" /></span>
-            <span>{text("任务面板", "Taskboard")}</span>
+            <span>{localCompanion ? text("本机 Agent", "Local Agent") : text("任务面板", "Taskboard")}</span>
           </div>
 
           <nav className="primary-nav" aria-label={text("视图", "Views")}>
-            <span className="nav-label">{text("工作区", "Workspace")}</span>
+            <span className="nav-label">{localCompanion ? text("本机", "Local") : text("工作区", "Workspace")}</span>
             <button className="nav-item active" type="button" aria-current="page">
               <span className="nav-glyph" aria-hidden="true">
-                <LinearIcon name="myIssues" />
+                <LinearIcon name={localCompanion ? "folder" : "myIssues"} />
               </span>
-              {text("议题", "Issues")}
-              <span className="nav-count">{tasks.length}</span>
+              {localCompanion ? text("Agent", "Agent") : text("议题", "Issues")}
+              {!localCompanion && <span className="nav-count">{tasks.length}</span>}
             </button>
           </nav>
 
           <div className="nav-spacer" />
           <div className="nav-footer">
-            {taskboardMetadata && (
+            {!localCompanion && taskboardMetadata && (
               <CompanionStatus
                 mode={taskboardMetadata.mode}
                 available={taskboardMetadata.mode !== "cloud" || taskboardMetadata.localCapabilities?.available === true}
@@ -3769,44 +3892,48 @@ export function App() {
           <div ref={dragRegionRef} className="workspace-drag-region" aria-hidden="true" />
 
           <div className="header-actions">
-            {selectedProject && (
-              <ProjectAutomationMenu
-                automation={selectedProjectAutomation}
-                models={automationModels}
-                pending={automationPending || automationCatalogLoading}
-                error={automationCatalogError ?? automationError}
-                unavailableReason={automationProjectContext.unavailableReason}
-                onOpen={() => void reconcileProjectAutomation()}
-                onChange={(options) => void saveProjectAutomation(options)}
-              />
-            )}
-            {isJiraProject && (
-              <button
-                className="icon-button"
-                type="button"
-                disabled={jiraSyncing}
-                onClick={() => void syncJiraNow()}
-                aria-label={text("同步 Jira", "Sync Jira")}
-                title={text("同步 Jira", "Sync Jira")}
-              >
-                <RefreshIcon color="currentColor" />
-              </button>
-            )}
-            {selectedProjectId && !isJiraProject && (
-              <button
-                className="icon-button header-create-button"
-                type="button"
-                onClick={() => setEditor({ task: null, status: "todo" })}
-                aria-label={text("新建议题", "Create issue")}
-                title={text("新建议题 (C)", "Create issue (C)")}
-              >
-                <PlusIcon color="currentColor" size={14} />
-              </button>
+            {!localCompanion && (
+              <>
+                {selectedProject && (
+                  <ProjectAutomationMenu
+                    automation={selectedProjectAutomation}
+                    models={automationModels}
+                    pending={automationPending || automationCatalogLoading}
+                    error={automationCatalogError ?? automationError}
+                    unavailableReason={automationProjectContext.unavailableReason}
+                    onOpen={() => void reconcileProjectAutomation()}
+                    onChange={(options) => void saveProjectAutomation(options)}
+                  />
+                )}
+                {isJiraProject && (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    disabled={jiraSyncing}
+                    onClick={() => void syncJiraNow()}
+                    aria-label={text("同步 Jira", "Sync Jira")}
+                    title={text("同步 Jira", "Sync Jira")}
+                  >
+                    <RefreshIcon color="currentColor" />
+                  </button>
+                )}
+                {selectedProjectId && !isJiraProject && (
+                  <button
+                    className="icon-button header-create-button"
+                    type="button"
+                    onClick={() => setEditor({ task: null, status: "todo" })}
+                    aria-label={text("新建议题", "Create issue")}
+                    title={text("新建议题 (C)", "Create issue (C)")}
+                  >
+                    <PlusIcon color="currentColor" size={14} />
+                  </button>
+                )}
+              </>
             )}
           </div>
         </header>
 
-        {selectedProjectId && !detailTask && <div className="board-toolbar">
+        {!localCompanion && selectedProjectId && !detailTask && <div className="board-toolbar">
           <div className="view-tabs" aria-label={text("看板视图", "Board views")}>
             <button
               className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
@@ -3956,7 +4083,29 @@ export function App() {
           </div>
         )}
 
-        {detailTask && selectedProject ? (
+        {localCompanion ? (
+          <LocalCompanionPanel
+            project={selectedProjectChoice}
+            task={detailTask && selectedProject ? detailTask : null}
+            workspacePath={localCompanionWorkspacePath}
+            taskStatusLabel={detailTask ? taskStatusLabel(language, detailTask.status) : null}
+            available={taskboardMetadata?.localCapabilities?.available === true}
+            mappingPending={mappingProjectId === selectedProjectChoice?.id}
+            onSelectProject={() => {
+              setProjectContextMenu(null);
+              setProjectMenuSearch("");
+              setProjectMenuOpen(true);
+            }}
+            onMapWorkspace={selectedProjectChoice
+              && selectedProjectChoice.persisted
+              && selectedProjectChoice.id !== GLOBAL_PROJECT_ID
+              && selectedProjectChoice.id !== JIRA_PROJECT_ID
+              ? () => void mapProjectWorkspace(selectedProjectChoice)
+              : undefined}
+            onOpenTask={(task) => void openTaskInThread(task)}
+            text={text}
+          />
+        ) : detailTask && selectedProject ? (
           <TaskDetail
             key={detailTask.id}
             task={detailTask}
